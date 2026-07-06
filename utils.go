@@ -6,7 +6,41 @@ import (
 	"math"
 	"os"
 	"strconv"
+	
+	"github.com/pelletier/go-toml/v2"
 )
+type Config struct {
+	Network struct {
+		Nodes    int     `toml:"nodes"`
+		SpaceMin float64 `toml:"space_min"`
+		SpaceMax float64 `toml:"space_max"`
+		GpsErr   float64 `toml:"gps_err"`
+		DistErr  float64 `toml:"dist_err"`
+	} `toml:"network"`
+
+	Hyperparams struct {
+		Alpha         float64 `toml:"alpha"`
+		Lambda        float64 `toml:"lambda"`
+		Eps           float64 `toml:"eps"`
+		MaxIter       int     `toml:"max_iter"`
+		EkfIter       int     `toml:"ekf_iter"`
+		AnchorsCount  int     `toml:"anchors_count"` // Задел на будущее для жестких якорей
+	} `toml:"hyperparams"`
+}
+
+// LoadConfigFromFile читает и парсит TOML-конфиг
+func LoadConfigFromFile(filepath string) (*Config, error) {
+	file, err := os.ReadFile(filepath)
+	if err != nil {
+		return nil, err
+	}
+	var cfg Config
+	err = toml.Unmarshal(file, &cfg)
+	if err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
 // Point описывает вектор
 type Point struct {
 	X, Y, Z float64
