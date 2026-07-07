@@ -1,0 +1,15 @@
+[network]
+nodes = 5
+space_min = 0.0
+space_max = 2.0 # Все объекты в комнате 2х2 метра
+gps_err = 0.3
+dist_err = 0.05
+
+[hyperparams]
+alpha = 0.0005  # Критически важно: очень маленький шаг!
+lambda = 0.1
+eps = 0.000001  # Высокая точность остановки
+max_iter = 5000
+ekf_iter = 5
+q = 0.0001
+r = 0.0025

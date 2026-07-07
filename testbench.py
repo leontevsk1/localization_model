@@ -6,8 +6,7 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 
 # Настройки путей
-CONFIG_PATH = "config/test1.toml"
-GO_COMMAND = ["go", "run", ".", "-config", CONFIG_PATH]
+CONFIG_DIR = "config"
 MD_REPORT_PATH = "report.md"
 GRADIENT_CSV = "mod1_history.csv"
 EKF_CSV = "ekf_history.csv"
@@ -23,14 +22,19 @@ def get_git_commit():
         return "Git-репозиторий не найден или нет коммитов"
 
 
-def run_go_simulation():
-    print("🚀 Запуск Go-симуляции...")
-    result = subprocess.run(GO_COMMAND, capture_output=True, text=True)
+def run_go_simulation(config_path):
+    print(f"🚀 Запуск Go-симуляции: {config_path}")
+
+    go_command = ["go", "run", ".", "-config", config_path]
+
+    result = subprocess.run(go_command, capture_output=True, text=True)
     print(result.stdout)
+
     if result.returncode != 0:
         print("❌ Ошибка компиляции или выполнения Go:")
         print(result.stderr)
-        exit(1)
+        return None
+
     print("✅ Симуляция успешно завершена.\n")
     return result.stdout
 
@@ -124,15 +128,32 @@ def generate_markdown(commit_hash, config_data, go_output, grad_img, ekf_img, ti
 if __name__ == "__main__":
     os.makedirs(IMG_DIR, exist_ok=True)
 
-    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
     commit_hash = get_git_commit()
-    config_data = toml.load(CONFIG_PATH)
 
-    go_output = run_go_simulation()
+    for root, _, files in os.walk(CONFIG_DIR):
+        for file in files:
+            if not file.endswith(".toml"):
+                continue
 
-    grad_img = plot_gradient_descent(run_id)
-    ekf_img = plot_ekf(run_id)
+            config_path = os.path.join(root, file)
 
-    generate_markdown(commit_hash, config_data, go_output, grad_img, ekf_img, timestamp)
+            run_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            config_data = toml.load(config_path)
+
+            go_output = run_go_simulation(config_path)
+            if go_output is None:
+                continue
+
+            grad_img = plot_gradient_descent(run_id)
+            ekf_img = plot_ekf(run_id)
+
+            generate_markdown(
+                commit_hash,
+                config_data,
+                go_output,
+                grad_img,
+                ekf_img,
+                timestamp,
+            )
