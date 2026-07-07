@@ -1,0 +1,14 @@
+[network]
+nodes = 8
+space_min = 0.0
+space_max = 200.0
+gps_err = 45.0
+dist_err = 0.1
+
+[hyperparams]
+alpha = 0.02
+lambda = 0.01
+eps = 0.0001
+max_iter = 5000
+ekf_iter = 10
+anchors_count = 3   # 3 анкера спасают ситуацию при плохом GPS

@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from datetime import datetime
 
 # Настройки путей
-CONFIG_DIR = "config"
+CONFIG_DIR = "config/anchors"
 MD_REPORT_PATH = "report.md"
 GRADIENT_CSV = "mod1_history.csv"
 EKF_CSV = "ekf_history.csv"

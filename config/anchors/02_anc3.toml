@@ -1,0 +1,14 @@
+[network]
+nodes = 8
+space_min = 0.0
+space_max = 100.0
+gps_err = 8.5
+dist_err = 0.3
+
+[hyperparams]
+alpha = 0.02
+lambda = 0.2
+eps = 1e-5
+max_iter = 2500
+ekf_iter = 8
+anchors_count = 3   # узлы 0,1,2 – анкеры
