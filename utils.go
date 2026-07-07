@@ -49,8 +49,9 @@ type Point struct {
 // Node описывает объект сети
 type Node struct {
 	ID           int
-	InitialCoord Point // Мнимые стартовые координаты
-	CurrentCoord Point // Текущие расчетные координаты
+	InitialCoord Point
+	CurrentCoord Point
+	IsAnchor     bool   // новое поле
 }
 
 // Distance считает евклидово расстояние между двумя точками

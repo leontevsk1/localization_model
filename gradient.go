@@ -1,4 +1,5 @@
 package main
+
 import (
 	"fmt"
 	"math"
@@ -10,6 +11,7 @@ func RunGradientDescent(nodes []*Node, distances [][]float64, alpha, lambda, eps
 	csvData := [][]string{
 		{"Iteration", "Node0_X", "Node0_Y", "Node0_Z"},
 	}
+
 	for iter := 0; iter < maxIter; iter++ {
 		maxShift := 0.0
 
@@ -17,18 +19,24 @@ func RunGradientDescent(nodes []*Node, distances [][]float64, alpha, lambda, eps
 		gradients := make([]Point, n)
 
 		for i := 0; i < n; i++ {
+			if nodes[i].IsAnchor {
+				gradients[i] = Point{} // нулевой градиент, для единообразия массива
+				continue
+			}
+
 			var gx, gy, gz float64
 
-			// градиент от соседей 
+			// градиент от соседей
 			for j := 0; j < n; j++ {
 				if i == j {
 					continue
 				}
-				
+
 				dMeas := distances[i][j]
 				dCalc := Distance(nodes[i].CurrentCoord, nodes[j].CurrentCoord)
-				
-				// Коэффициент невязки (1 - d_ij / d_calc)
+
+				// используем и nodes[j], даже если nodes[j].IsAnchor == true —
+				// это и есть их польза: точный ориентир для соседей
 				errRatio := 1.0 - (dMeas / dCalc)
 
 				gx += errRatio * (nodes[i].CurrentCoord.X - nodes[j].CurrentCoord.X)
@@ -44,8 +52,12 @@ func RunGradientDescent(nodes []*Node, distances [][]float64, alpha, lambda, eps
 			gradients[i] = Point{X: gx, Y: gy, Z: gz}
 		}
 
-		// проверка сходимости
+		// применение шага
 		for i := 0; i < n; i++ {
+			if nodes[i].IsAnchor {
+				continue // анкер не двигаем, в maxShift тоже не учитываем
+			}
+
 			shiftX := alpha * gradients[i].X
 			shiftY := alpha * gradients[i].Y
 			shiftZ := alpha * gradients[i].Z
@@ -54,12 +66,13 @@ func RunGradientDescent(nodes []*Node, distances [][]float64, alpha, lambda, eps
 			nodes[i].CurrentCoord.Y -= shiftY
 			nodes[i].CurrentCoord.Z -= shiftZ
 
-			//модуль смещения для условия остановки
+			// модуль смещения для условия остановки
 			shiftMag := math.Sqrt(shiftX*shiftX + shiftY*shiftY + shiftZ*shiftZ)
 			if shiftMag > maxShift {
 				maxShift = shiftMag
 			}
 		}
+
 		// Фиксируем шаг в массив для CSV
 		csvData = append(csvData, []string{
 			fmt.Sprintf("%d", iter),
@@ -67,12 +80,14 @@ func RunGradientDescent(nodes []*Node, distances [][]float64, alpha, lambda, eps
 			fmt.Sprintf("%.4f", nodes[0].CurrentCoord.Y),
 			fmt.Sprintf("%.4f", nodes[0].CurrentCoord.Z),
 		})
+
 		// Условие остановки
 		if maxShift < epsilon {
 			fmt.Printf("Градиентный спуск сошелся на итерации %d\n", iter)
 			break
 		}
 	}
+
 	// Запись накопленного лога в файл через utils.go
 	if err := WriteHistoryToCSV("mod1_history.csv", csvData); err != nil {
 		fmt.Printf("Не удалось записать CSV: %v\n", err)

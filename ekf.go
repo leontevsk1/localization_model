@@ -1,19 +1,43 @@
 package main
 
 import (
-	"math"
-	"gonum.org/v1/gonum/mat"
 	"fmt"
+	"math"
+
+	"gonum.org/v1/gonum/mat"
 )
 
 // RunEKF выполняет Расширенный фильтр Калмана (EKF) с использованием gonum/mat.
-// Алгоритм обрабатывает все измерения дальностей за один матричный шаг (Batch Update).
+// Анкерные узлы (node.IsAnchor == true) полностью исключены из вектора состояния:
+// их координаты считаются точными и используются как неподвижные ориентиры
+// при вычислении измерений и Якобиана для остальных узлов.
 func RunEKF(nodes []*Node, distances [][]float64, iterations int, q, r float64) {
 	n := len(nodes)
-	stateSize := n * 3 // По 3 координаты (X, Y, Z) на каждый узел
+
+	// Список подвижных (не-анкерных) узлов и обратная карта node index -> state index
+	movable := make([]int, 0, n)
+	nodeToState := make([]int, n)
+	for i := range nodeToState {
+		nodeToState[i] = -1 // -1 означает "это анкер, в состоянии его нет"
+	}
+	for i, node := range nodes {
+		if !node.IsAnchor {
+			nodeToState[i] = len(movable)
+			movable = append(movable, i)
+		}
+	}
+	stateSize := len(movable) * 3
+
+	if stateSize == 0 {
+		fmt.Println("EKF пропущен: все узлы являются анкерами, оптимизировать нечего.")
+		return
+	}
+
 	// Хранилище истории
 	var ekfHistory [][]float64
-	// Подсчет количества измерений 
+
+	// Подсчет количества измерений (пары учитываются все, включая пары анкер-анкер,
+	// они просто не дадут вклада в Якобиан ни по одной переменной состояния)
 	numMeas := 0
 	for i := 0; i < n; i++ {
 		for j := i + 1; j < n; j++ {
@@ -21,12 +45,12 @@ func RunEKF(nodes []*Node, distances [][]float64, iterations int, q, r float64) 
 		}
 	}
 
-	// Инициализация вектора состояния X
+	// Инициализация вектора состояния X — только по подвижным узлам
 	xData := make([]float64, stateSize)
-	for i, node := range nodes {
-		xData[i*3+0] = node.CurrentCoord.X
-		xData[i*3+1] = node.CurrentCoord.Y
-		xData[i*3+2] = node.CurrentCoord.Z
+	for k, nodeIdx := range movable {
+		xData[k*3+0] = nodes[nodeIdx].CurrentCoord.X
+		xData[k*3+1] = nodes[nodeIdx].CurrentCoord.Y
+		xData[k*3+2] = nodes[nodeIdx].CurrentCoord.Z
 	}
 	X := mat.NewVecDense(stateSize, xData)
 
@@ -47,40 +71,47 @@ func RunEKF(nodes []*Node, distances [][]float64, iterations int, q, r float64) 
 		R.Set(i, i, r)
 	}
 
-	// Предварительное выделение памяти под рабочие матрицы 
+	// Предварительное выделение памяти под рабочие матрицы
+	H := mat.NewDense(numMeas, stateSize, nil) // Якобиан
+	Z := mat.NewVecDense(numMeas, nil)         // Реальные измерения
+	Zcalc := mat.NewVecDense(numMeas, nil)     // Расчетные измерения
+	Y := mat.NewVecDense(numMeas, nil)         // Инновация (невязка)
 
-	H := mat.NewDense(numMeas, stateSize, nil)       // Якобиан
-	Z := mat.NewVecDense(numMeas, nil)               // Реальные измерения
-	Zcalc := mat.NewVecDense(numMeas, nil)           // Расчетные измерения
-	Y := mat.NewVecDense(numMeas, nil)               // Инновация (Невязка)
-	
 	PHt := mat.NewDense(stateSize, numMeas, nil)
 	S := mat.NewDense(numMeas, numMeas, nil)
-	Sinv := mat.NewDense(numMeas, numMeas, nil)      // Обратная матрица инноваций
-	K := mat.NewDense(stateSize, numMeas, nil)       // Коэффициент Калмана
-	
-	I := mat.NewDense(stateSize, stateSize, nil)     // Единичная матрица
+	Sinv := mat.NewDense(numMeas, numMeas, nil) // Обратная матрица инноваций
+	K := mat.NewDense(stateSize, numMeas, nil)  // Коэффициент Калмана
+
+	I := mat.NewDense(stateSize, stateSize, nil) // Единичная матрица
 	for i := 0; i < stateSize; i++ {
 		I.Set(i, i, 1.0)
 	}
-	
+
 	KX := mat.NewVecDense(stateSize, nil)
 	KH := mat.NewDense(stateSize, stateSize, nil)
 	IKH := mat.NewDense(stateSize, stateSize, nil)
 
+	// Вспомогательная функция: получить текущие координаты узла —
+	// из вектора состояния X, если узел подвижен, либо из nodes[], если это анкер.
+	coordOf := func(nodeIdx int) (x, y, z float64) {
+		if s := nodeToState[nodeIdx]; s != -1 {
+			return X.AtVec(s*3 + 0), X.AtVec(s*3 + 1), X.AtVec(s*3 + 2)
+		}
+		c := nodes[nodeIdx].CurrentCoord
+		return c.X, c.Y, c.Z
+	}
+
 	// Основной цикл EKF
 	for iter := 0; iter < iterations; iter++ {
 		// ЭТАП ПРЕДСКАЗАНИЯ
-		// Состояние X остается прежним (объекты неподвижны), но дисперсия растет
 		P.Add(P, Q)
 
 		// ЭТАП КОРРЕКЦИИ
 		measIdx := 0
 		for i := 0; i < n; i++ {
 			for j := i + 1; j < n; j++ {
-				// Текущие координаты узлов из вектора состояния
-				xi, yi, zi := X.AtVec(i*3+0), X.AtVec(i*3+1), X.AtVec(i*3+2)
-				xj, yj, zj := X.AtVec(j*3+0), X.AtVec(j*3+1), X.AtVec(j*3+2)
+				xi, yi, zi := coordOf(i)
+				xj, yj, zj := coordOf(j)
 
 				dx, dy, dz := xi-xj, yi-yj, zi-zj
 				dCalc := math.Sqrt(dx*dx + dy*dy + dz*dz)
@@ -88,18 +119,23 @@ func RunEKF(nodes []*Node, distances [][]float64, iterations int, q, r float64) 
 					dCalc = 1e-6 // Защита от деления на ноль
 				}
 
-				// Заполнение векторов измерений
 				Z.SetVec(measIdx, distances[i][j])
 				Zcalc.SetVec(measIdx, dCalc)
 
-				// Заполнение матрицы Якоби H (производные дистанции по координатам)
-				H.Set(measIdx, i*3+0, dx/dCalc)
-				H.Set(measIdx, i*3+1, dy/dCalc)
-				H.Set(measIdx, i*3+2, dz/dCalc)
-
-				H.Set(measIdx, j*3+0, -dx/dCalc)
-				H.Set(measIdx, j*3+1, -dy/dCalc)
-				H.Set(measIdx, j*3+2, -dz/dCalc)
+				// Якобиан заполняется только по тем координатам, которые
+				// реально есть в векторе состояния. Для анкера строка H
+				// по его столбцам просто не существует — вклад в невязку
+				// он вносит только через сам факт своей неподвижности.
+				if si := nodeToState[i]; si != -1 {
+					H.Set(measIdx, si*3+0, dx/dCalc)
+					H.Set(measIdx, si*3+1, dy/dCalc)
+					H.Set(measIdx, si*3+2, dz/dCalc)
+				}
+				if sj := nodeToState[j]; sj != -1 {
+					H.Set(measIdx, sj*3+0, -dx/dCalc)
+					H.Set(measIdx, sj*3+1, -dy/dCalc)
+					H.Set(measIdx, sj*3+2, -dz/dCalc)
+				}
 
 				measIdx++
 			}
@@ -116,7 +152,7 @@ func RunEKF(nodes []*Node, distances [][]float64, iterations int, q, r float64) 
 		// Обращение матрицы S
 		err := Sinv.Inverse(S)
 		if err != nil {
-			// Если матрица вырождена, прекращаем итерации
+			fmt.Printf("EKF прерван на итерации %d: ошибка обращения матрицы S: %v\n", iter, err)
 			break
 		}
 
@@ -132,7 +168,7 @@ func RunEKF(nodes []*Node, distances [][]float64, iterations int, q, r float64) 
 		IKH.Sub(I, KH)
 		P.Mul(IKH, P)
 
-		// Сохраняем текущее состояние всех узлов в историю
+		// Сохраняем текущее состояние подвижных узлов в историю
 		historyRow := make([]float64, 0, 1+stateSize)
 		historyRow = append(historyRow, float64(iter))
 		for i := 0; i < stateSize; i++ {
@@ -141,15 +177,15 @@ func RunEKF(nodes []*Node, distances [][]float64, iterations int, q, r float64) 
 		ekfHistory = append(ekfHistory, historyRow)
 	}
 
-	// Запись вычисленных координат обратно в структуру узлов
-	for i := 0; i < n; i++ {
-		nodes[i].CurrentCoord.X = X.AtVec(i*3 + 0)
-		nodes[i].CurrentCoord.Y = X.AtVec(i*3 + 1)
-		nodes[i].CurrentCoord.Z = X.AtVec(i*3 + 2)
+	// Запись вычисленных координат обратно в структуру узлов (только для подвижных)
+	for k, nodeIdx := range movable {
+		nodes[nodeIdx].CurrentCoord.X = X.AtVec(k*3 + 0)
+		nodes[nodeIdx].CurrentCoord.Y = X.AtVec(k*3 + 1)
+		nodes[nodeIdx].CurrentCoord.Z = X.AtVec(k*3 + 2)
 	}
 
 	// Сохранение лога в корень проекта
-	if err := SaveEKFHistory("ekf_history.csv", ekfHistory, n); err != nil {
+	if err := SaveEKFHistory("ekf_history.csv", ekfHistory, len(movable)); err != nil {
 		fmt.Printf("Ошибка при записи лога EKF: %v\n", err)
 	} else {
 		fmt.Println("Файл ekf_history.csv успешно сгенерирован.")

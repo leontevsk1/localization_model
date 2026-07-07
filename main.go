@@ -24,7 +24,7 @@ func main() {
 	epsilon := flag.Float64("eps", 1e-5, "Критерий останова градиентного спуска")
 	maxIter := flag.Int("max-iter", 2000, "Лимит итераций градиентного спуска")
 	ekfIter := flag.Int("ekf-iter", 5, "Количество итераций EKF")
-
+	anchorsCountFlag := flag.Int("anchors", 0, "Количество анкерных узлов с точными координатами")
 	flag.Parse()
 
 	// Переменные, которые пойдут в логику генерации
@@ -32,7 +32,7 @@ func main() {
 	var sMin, sMax, gErr, dErr float64
 	var gAlpha, gLambda, gEps float64
 	var gMaxIter, eIter int
-
+	var anchorsCount int
 	// Если передан конфиг — читаем его, иначе берем CLI флаги
 	if *configPath != "" {
 		fmt.Printf("Загрузка сценария из файла: %s\n", *configPath)
@@ -46,7 +46,7 @@ func main() {
 		sMax = cfg.Network.SpaceMax
 		gErr = cfg.Network.GpsErr
 		dErr = cfg.Network.DistErr
-
+		anchorsCount = cfg.Hyperparams.AnchorsCount
 		gAlpha = cfg.Hyperparams.Alpha
 		gLambda = cfg.Hyperparams.Lambda
 		gEps = cfg.Hyperparams.Eps
@@ -58,7 +58,7 @@ func main() {
 		sMax = *spaceMax
 		gErr = *gpsErr
 		dErr = *distErr
-
+		anchorsCount = *anchorsCountFlag
 		gAlpha = *alpha
 		gLambda = *lambda
 		gEps = *epsilon
@@ -86,6 +86,19 @@ func main() {
 		rZ := sMin + rng.Float64()*(sMax-sMin)
 		realCoords[i] = Point{X: rX, Y: rY, Z: rZ}
 
+		isAnchor := i < anchorsCount
+
+		if isAnchor {
+			// Анкер: координаты точные, без шума GPS
+			nodes[i] = &Node{
+				ID:           i,
+				InitialCoord: realCoords[i],
+				CurrentCoord: realCoords[i],
+				IsAnchor:     true,
+			}
+			continue
+		}
+
 		dx := (rng.Float64()*2 - 1.0) * gErr
 		dy := (rng.Float64()*2 - 1.0) * gErr
 		dz := (rng.Float64()*2 - 1.0) * gErr
@@ -94,6 +107,7 @@ func main() {
 			ID:           i,
 			InitialCoord: Point{X: rX + dx, Y: rY + dy, Z: rZ + dz},
 			CurrentCoord: Point{X: rX + dx, Y: rY + dy, Z: rZ + dz},
+			IsAnchor:     false,
 		}
 	}
 
@@ -124,7 +138,16 @@ func main() {
 
 	fmt.Println("\n--- Запуск Градиентного спуска ---")
 	RunGradientDescent(nodes, distances, gAlpha, gLambda, gEps, gMaxIter)
-
+	minDist := math.Inf(1)
+	for i := 0; i < n; i++ {
+		for j := i + 1; j < n; j++ {
+			d := Distance(nodes[i].CurrentCoord, nodes[j].CurrentCoord)
+			if d < minDist {
+				minDist = d
+			}
+		}
+	}
+	fmt.Printf("Минимальное расстояние между узлами перед EKF: %.6f\n", minDist)
 	fmt.Println("\n--- Запуск Расширенного фильтра Калмана (EKF) ---")
 	RunEKF(nodes, distances, eIter, 0.001, 0.1)
 

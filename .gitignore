@@ -1,2 +1,5 @@
 *.csv
 *.png
+spec.md
+.env
+report.md
