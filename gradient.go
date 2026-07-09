@@ -7,7 +7,6 @@ import (
 
 func RunGradientDescent(nodes []*Node, distances [][]float64, alpha, lambda, epsilon float64, maxIter int) {
 	n := len(nodes)
-	// Подготовка структуры данных для CSV
 	csvData := [][]string{
 		{"Iteration", "Node0_X", "Node0_Y", "Node0_Z"},
 	}
@@ -35,8 +34,6 @@ func RunGradientDescent(nodes []*Node, distances [][]float64, alpha, lambda, eps
 				dMeas := distances[i][j]
 				dCalc := Distance(nodes[i].CurrentCoord, nodes[j].CurrentCoord)
 
-				// используем и nodes[j], даже если nodes[j].IsAnchor == true —
-				// это и есть их польза: точный ориентир для соседей
 				errRatio := 1.0 - (dMeas / dCalc)
 
 				gx += errRatio * (nodes[i].CurrentCoord.X - nodes[j].CurrentCoord.X)

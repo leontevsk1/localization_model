@@ -3,22 +3,18 @@ package main
 import (
 	"fmt"
 	"math"
-
 	"gonum.org/v1/gonum/mat"
 )
 
-// RunEKF выполняет Расширенный фильтр Калмана (EKF) с использованием gonum/mat.
-// Анкерные узлы (node.IsAnchor == true) полностью исключены из вектора состояния:
-// их координаты считаются точными и используются как неподвижные ориентиры
-// при вычислении измерений и Якобиана для остальных узлов.
+// Анкерные узлы (node.IsAnchor == true) полностью исключены из вектора состояния: их координаты считаются точными и используются как неподвижные ориентиры при вычислении измерений и Якобиана для остальных узлов.
 func RunEKF(nodes []*Node, distances [][]float64, iterations int, q, r float64) {
 	n := len(nodes)
 
-	// Список подвижных (не-анкерных) узлов и обратная карта node index -> state index
+	// Список подвижных узлов
 	movable := make([]int, 0, n)
 	nodeToState := make([]int, n)
 	for i := range nodeToState {
-		nodeToState[i] = -1 // -1 означает "это анкер, в состоянии его нет"
+		nodeToState[i] = -1 // -1 означает "это анкер, в состоянии его нет
 	}
 	for i, node := range nodes {
 		if !node.IsAnchor {
@@ -36,8 +32,7 @@ func RunEKF(nodes []*Node, distances [][]float64, iterations int, q, r float64) 
 	// Хранилище истории
 	var ekfHistory [][]float64
 
-	// Подсчет количества измерений (пары учитываются все, включая пары анкер-анкер,
-	// они просто не дадут вклада в Якобиан ни по одной переменной состояния)
+	// Подсчет количества измерений
 	numMeas := 0
 	for i := 0; i < n; i++ {
 		for j := i + 1; j < n; j++ {
@@ -76,7 +71,6 @@ func RunEKF(nodes []*Node, distances [][]float64, iterations int, q, r float64) 
 	Z := mat.NewVecDense(numMeas, nil)         // Реальные измерения
 	Zcalc := mat.NewVecDense(numMeas, nil)     // Расчетные измерения
 	Y := mat.NewVecDense(numMeas, nil)         // Инновация (невязка)
-
 	PHt := mat.NewDense(stateSize, numMeas, nil)
 	S := mat.NewDense(numMeas, numMeas, nil)
 	Sinv := mat.NewDense(numMeas, numMeas, nil) // Обратная матрица инноваций
@@ -91,8 +85,7 @@ func RunEKF(nodes []*Node, distances [][]float64, iterations int, q, r float64) 
 	KH := mat.NewDense(stateSize, stateSize, nil)
 	IKH := mat.NewDense(stateSize, stateSize, nil)
 
-	// Вспомогательная функция: получить текущие координаты узла —
-	// из вектора состояния X, если узел подвижен, либо из nodes[], если это анкер.
+	// Вспомогательная функция: получить текущие координаты узла — из вектора состояния X, если узел подвижен, либо из nodes[], если это анкер.
 	coordOf := func(nodeIdx int) (x, y, z float64) {
 		if s := nodeToState[nodeIdx]; s != -1 {
 			return X.AtVec(s*3 + 0), X.AtVec(s*3 + 1), X.AtVec(s*3 + 2)

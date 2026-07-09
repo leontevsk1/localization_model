@@ -23,7 +23,7 @@ def get_git_commit():
 
 
 def run_go_simulation(config_path):
-    print(f"🚀 Запуск Go-симуляции: {config_path}")
+    print(f"Запуск Go-симуляции: {config_path}")
 
     go_command = ["go", "run", ".", "-config", config_path]
 
@@ -31,11 +31,11 @@ def run_go_simulation(config_path):
     print(result.stdout)
 
     if result.returncode != 0:
-        print("❌ Ошибка компиляции или выполнения Go:")
+        print("Ошибка компиляции или выполнения Go:")
         print(result.stderr)
         return None
 
-    print("✅ Симуляция успешно завершена.\n")
+    print("Симуляция успешно завершена.\n")
     return result.stdout
 
 
@@ -68,7 +68,7 @@ def plot_ekf(run_id):
     df = pd.read_csv(EKF_CSV)
 
     if 'Iteration' not in df.columns or 'Node0_X' not in df.columns:
-        print(f"⚠️ Неожиданные колонки в {EKF_CSV}: {list(df.columns)}")
+        print(f"Неожиданные колонки в {EKF_CSV}: {list(df.columns)}")
         return ""
 
     plt.figure(figsize=(10, 5))
@@ -122,7 +122,7 @@ def generate_markdown(commit_hash, config_data, go_output, grad_img, ekf_img, ti
         f.write("\n".join(lines))
         f.write("\n")
 
-    print(f"📄 Отчёт дополнен новой записью в {MD_REPORT_PATH}")
+    print(f"Отчёт дополнен новой записью в {MD_REPORT_PATH}")
 
 
 if __name__ == "__main__":

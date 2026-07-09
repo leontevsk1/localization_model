@@ -9,7 +9,6 @@ import (
 )
 
 func main() {
-	// Флаг для пути к файлу конфигурации
 	configPath := flag.String("config", "", "Путь к TOML-файлу конфигурации сценария")
 
 	// Стандартные CLI флаги (как значения по умолчанию)
@@ -24,15 +23,21 @@ func main() {
 	epsilon := flag.Float64("eps", 1e-5, "Критерий останова градиентного спуска")
 	maxIter := flag.Int("max-iter", 2000, "Лимит итераций градиентного спуска")
 	ekfIter := flag.Int("ekf-iter", 5, "Количество итераций EKF")
+	ekfQFlag := flag.Float64("q", 0.001, "Шум процесса EKF")
+	ekfRFlag := flag.Float64("r", 0.1, "Шум измерений EKF")
 	anchorsCountFlag := flag.Int("anchors", 0, "Количество анкерных узлов с точными координатами")
 	flag.Parse()
 
-	// Переменные, которые пойдут в логику генерации
-	var n int
-	var sMin, sMax, gErr, dErr float64
-	var gAlpha, gLambda, gEps float64
-	var gMaxIter, eIter int
-	var anchorsCount int
+	var (
+		n int
+		sMin, sMax, gErr, dErr float64
+		gAlpha, gLambda, gEps float64
+		gMaxIter, eIter int
+		anchorsCount int
+
+		ekfQ float64
+		ekfR float64
+	)
 	// Если передан конфиг — читаем его, иначе берем CLI флаги
 	if *configPath != "" {
 		fmt.Printf("Загрузка сценария из файла: %s\n", *configPath)
@@ -52,6 +57,8 @@ func main() {
 		gEps = cfg.Hyperparams.Eps
 		gMaxIter = cfg.Hyperparams.MaxIter
 		eIter = cfg.Hyperparams.EkfIter
+		ekfQ = cfg.Hyperparams.Q
+		ekfR = cfg.Hyperparams.R
 	} else {
 		n = *numNodes
 		sMin = *spaceMin
@@ -64,6 +71,8 @@ func main() {
 		gEps = *epsilon
 		gMaxIter = *maxIter
 		eIter = *ekfIter
+		ekfQ = *ekfQFlag
+		ekfR = *ekfRFlag
 	}
 
 	if n < 3 {
@@ -77,60 +86,7 @@ func main() {
 	fmt.Printf("Узлов: %d | Пространство: [%.1f, %.1f] | Шум GPS: ±%.2f м | Шум дальномеров: ±%.2f м\n\n",
 		n, sMin, sMax, gErr, dErr)
 
-	// [Генерация координат]
-	realCoords := make([]Point, n)
-	nodes := make([]*Node, n)
-	for i := 0; i < n; i++ {
-		rX := sMin + rng.Float64()*(sMax-sMin)
-		rY := sMin + rng.Float64()*(sMax-sMin)
-		rZ := sMin + rng.Float64()*(sMax-sMin)
-		realCoords[i] = Point{X: rX, Y: rY, Z: rZ}
-
-		isAnchor := i < anchorsCount
-
-		if isAnchor {
-			// Анкер: координаты точные, без шума GPS
-			nodes[i] = &Node{
-				ID:           i,
-				InitialCoord: realCoords[i],
-				CurrentCoord: realCoords[i],
-				IsAnchor:     true,
-			}
-			continue
-		}
-
-		dx := (rng.Float64()*2 - 1.0) * gErr
-		dy := (rng.Float64()*2 - 1.0) * gErr
-		dz := (rng.Float64()*2 - 1.0) * gErr
-
-		nodes[i] = &Node{
-			ID:           i,
-			InitialCoord: Point{X: rX + dx, Y: rY + dy, Z: rZ + dz},
-			CurrentCoord: Point{X: rX + dx, Y: rY + dy, Z: rZ + dz},
-			IsAnchor:     false,
-		}
-	}
-
-	// [Генерация матрицы расстояний]
-	distances := make([][]float64, n)
-	for i := range distances {
-		distances[i] = make([]float64, n)
-	}
-	for i := 0; i < n; i++ {
-		for j := i + 1; j < n; j++ {
-			dx := realCoords[i].X - realCoords[j].X
-			dy := realCoords[i].Y - realCoords[j].Y
-			dz := realCoords[i].Z - realCoords[j].Z
-			trueDist := math.Sqrt(dx*dx + dy*dy + dz*dz)
-			noise := (rng.Float64()*2 - 1.0) * dErr
-			measDist := trueDist + noise
-			if measDist < 0 {
-				measDist = 0.001
-			}
-			distances[i][j] = measDist
-			distances[j][i] = measDist
-		}
-	}
+	nodes, realCoords, distances := buildMap(n, sMin, sMax, gErr, dErr, anchorsCount, rng)
 
 	// [Выполнение алгоритмов]
 	fmt.Println("Состояние ДО оптимизации:")
@@ -149,13 +105,19 @@ func main() {
 	}
 	fmt.Printf("Минимальное расстояние между узлами перед EKF: %.6f\n", minDist)
 	fmt.Println("\n--- Запуск Расширенного фильтра Калмана (EKF) ---")
-	RunEKF(nodes, distances, eIter, 0.001, 0.1)
+	RunEKF(nodes, distances, eIter, ekfQ, ekfR)
 
 	fmt.Println("\nСостояние ПОСЛЕ оптимизации:")
 	printGradientMetrics(nodes, realCoords, distances)
 
-	fmt.Println("\nСтатистика по EKF: ")
-	if err := AnalyzeEKFHistory("ekf_history.csv", realCoords, distances); err != nil {
+	movable := make([]int, 0, len(nodes))
+	for i, node := range nodes {
+		if !node.IsAnchor {
+			movable = append(movable, i)
+		}
+	}
+
+	if err := AnalyzeEKFHistory("ekf_history.csv", nodes, movable, realCoords, distances); err != nil {
 		fmt.Printf("Ошибка при анализе статистики: %v\n", err)
 	}
 }

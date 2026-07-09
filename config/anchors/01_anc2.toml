@@ -5,10 +5,13 @@ space_max = 100.0
 gps_err = 8.5
 dist_err = 0.3
 
+# config/anchors/00_an1.toml, 01_anc2.toml, 02_anc3.toml
 [hyperparams]
 alpha = 0.02
 lambda = 0.2
 eps = 1e-5
 max_iter = 2500
 ekf_iter = 8
-anchors_count = 2 # узлы 0 и 1 – анкеры
+anchors_count = 2 # (2 / 3 — в соответствующих файлах)
+q = 0.001
+r = 0.1

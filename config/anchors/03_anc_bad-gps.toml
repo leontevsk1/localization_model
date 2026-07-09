@@ -11,4 +11,6 @@ lambda = 0.01
 eps = 0.0001
 max_iter = 5000
 ekf_iter = 10
-anchors_count = 3   # 3 анкера спасают ситуацию при плохом GPS
+anchors_count = 3
+q = 0.001
+r = 0.01   # ≈ dist_err²

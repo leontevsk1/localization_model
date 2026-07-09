@@ -1,0 +1,108 @@
+# ==============================================================================
+# .claudeignore
+# Эталонный файл для ограничения контекста AI-агентов (Claude Code, Aider, etc.)
+# ==============================================================================
+
+# 1. Lock-файлы (Главные пожиратели токенов)
+# Эти файлы содержат тысячи строк хешей. LLM никогда не должна их читать или править.
+go.sum
+Cargo.lock
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+poetry.lock
+composer.lock
+Gemfile.lock
+
+# 2. Директории с исходным кодом зависимостей
+# Модель не должна анализировать чужой код, если только это не требуется явно.
+vendor/
+node_modules/
+.venv/
+venv/
+env/
+.tox/
+
+# 3. Скомпилированные бинарники, сборки и кэши
+# Бинарные данные ломают токенизатор, а минифицированный код сжигает окно контекста.
+target/
+build/
+dist/
+out/
+bin/
+obj/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.zig-cache/
+.cache/
+*.o
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.out
+*.elf
+*.hex
+*.bin
+*.min.js
+*.min.css
+*.map
+
+# 4. Базы данных, дампы и логи
+# Текстовые дампы БД и логи занимают мегабайты и не несут пользы для написания кода.
+*.log
+*.sqlite
+*.sqlite3
+*.db
+*.sql
+*.dump
+*.csv
+*.tsv
+*.dat
+*.tar
+*.gz
+*.zip
+
+# 5. Медиа, 3D-модели и CAD (Специфично для hardware/дронопортов)
+# Бинарные форматы моделей и чертежей.
+*.stl
+*.step
+*.stp
+*.gcode
+*.kicad_prl
+*.kicad_bak
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.ico
+*.svg
+*.mp4
+*.pdf
+
+# 6. Инфраструктура, секреты и сертификаты (VPN / Caddy)
+# Модели не нужно видеть приватные ключи и переменные окружения с паролями.
+*.pem
+*.key
+*.crt
+*.cert
+*.p12
+*.pfx
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# 7. Конфигурации редакторов и ОС
+.vscode/
+.idea/
+.fleet/
+.nvim/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
