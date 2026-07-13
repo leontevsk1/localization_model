@@ -23,9 +23,20 @@ func LoadConfigFromFile(filepath string) (*types.Config, error) {
 	return &cfg, nil
 }
 
-// WriteHistoryToCSV — утилита, которую вы можете вызвать из gradient.go
-func WriteHistoryToCSV(filename string, recordFields [][]string) error {
-	file, err := os.Create(filename)
+// WriteHistoryToCSV — утилита, которую вы можете вызвать из gradient.go.
+// doAppend=false создаёт файл заново (с заголовком), doAppend=true дозаписывает
+// строки в конец существующего файла (заголовок не пишется повторно).
+func WriteHistoryToCSV(filename string, recordFields [][]string, doAppend bool) error {
+	flags := os.O_CREATE | os.O_WRONLY
+	rows := recordFields
+	if doAppend {
+		flags |= os.O_APPEND
+		rows = recordFields[1:] // пропускаем заголовок при дозаписи
+	} else {
+		flags |= os.O_TRUNC
+	}
+
+	file, err := os.OpenFile(filename, flags, 0644)
 	if err != nil {
 		return err
 	}
@@ -34,7 +45,7 @@ func WriteHistoryToCSV(filename string, recordFields [][]string) error {
 	writer := csv.NewWriter(file)
 	defer writer.Flush()
 
-	for _, row := range recordFields {
+	for _, row := range rows {
 		if err := writer.Write(row); err != nil {
 			return err
 		}
@@ -43,8 +54,17 @@ func WriteHistoryToCSV(filename string, recordFields [][]string) error {
 }
 
 // SaveEKFHistory сохраняет детальную историю итераций EKF для всех узлов сети.
-func SaveEKFHistory(filename string, history [][]float64, nodeCount int) error {
-	file, err := os.Create(filename)
+// doAppend=false создаёт файл заново (с заголовком), doAppend=true дозаписывает
+// строки в конец существующего файла (заголовок не пишется повторно).
+func SaveEKFHistory(filename string, history [][]float64, nodeCount int, doAppend bool) error {
+	flags := os.O_CREATE | os.O_WRONLY
+	if doAppend {
+		flags |= os.O_APPEND
+	} else {
+		flags |= os.O_TRUNC
+	}
+
+	file, err := os.OpenFile(filename, flags, 0644)
 	if err != nil {
 		return err
 	}
@@ -53,19 +73,18 @@ func SaveEKFHistory(filename string, history [][]float64, nodeCount int) error {
 	writer := csv.NewWriter(file)
 	defer writer.Flush()
 
-	// Инициализируем slice строкой "Iteration" до входа в цикл
-	header := []string{"Iteration"}
-	
-	for i := 0; i < nodeCount; i++ {
-		header = append(header, 
-			fmt.Sprintf("Node%d_X", i), 
-			fmt.Sprintf("Node%d_Y", i), 
-			fmt.Sprintf("Node%d_Z", i),
-		)
-	}
-	
-	if err := writer.Write(header); err != nil {
-		return err
+	if !doAppend {
+		header := []string{"Iteration"}
+		for i := 0; i < nodeCount; i++ {
+			header = append(header,
+				fmt.Sprintf("Node%d_X", i),
+				fmt.Sprintf("Node%d_Y", i),
+				fmt.Sprintf("Node%d_Z", i),
+			)
+		}
+		if err := writer.Write(header); err != nil {
+			return err
+		}
 	}
 
 	for _, row := range history {

@@ -8,10 +8,21 @@ import (
 	"vostok/pkg/types"
 )
 
-func RunGradientDescent(nodes []*types.Node, measurements []types.Measurement, alpha, lambda, epsilon float64, maxIter int) {
+func RunGradientDescent(nodes []*types.Node, measurements []types.Measurement, alpha, lambda, epsilon float64, maxIter int, appendLog bool) {
 	n := len(nodes)
+
+	// Для лога берём первый подвижный узел — Node0 может быть анкером
+	// (неподвижен по определению), тогда график сходимости был бы плоским.
+	logNode := 0
+	for i, node := range nodes {
+		if !node.IsAnchor {
+			logNode = i
+			break
+		}
+	}
+
 	csvData := [][]string{
-		{"Iteration", "Node0_X", "Node0_Y", "Node0_Z"},
+		{"Iteration", fmt.Sprintf("Node%d_X", logNode), fmt.Sprintf("Node%d_Y", logNode), fmt.Sprintf("Node%d_Z", logNode)},
 	}
 
 	for iter := 0; iter < maxIter; iter++ {
@@ -69,9 +80,9 @@ func RunGradientDescent(nodes []*types.Node, measurements []types.Measurement, a
 		// Фиксируем шаг в массив для CSV
 		csvData = append(csvData, []string{
 			fmt.Sprintf("%d", iter),
-			fmt.Sprintf("%.4f", nodes[0].CurrentCoord.X),
-			fmt.Sprintf("%.4f", nodes[0].CurrentCoord.Y),
-			fmt.Sprintf("%.4f", nodes[0].CurrentCoord.Z),
+			fmt.Sprintf("%.4f", nodes[logNode].CurrentCoord.X),
+			fmt.Sprintf("%.4f", nodes[logNode].CurrentCoord.Y),
+			fmt.Sprintf("%.4f", nodes[logNode].CurrentCoord.Z),
 		})
 
 		// Условие остановки
@@ -82,7 +93,7 @@ func RunGradientDescent(nodes []*types.Node, measurements []types.Measurement, a
 	}
 
 	// Запись накопленного лога в файл через pkg/io
-	if err := io.WriteHistoryToCSV("mod1_history.csv", csvData); err != nil {
+	if err := io.WriteHistoryToCSV("mod1_history.csv", csvData, appendLog); err != nil {
 		fmt.Printf("Не удалось записать CSV: %v\n", err)
 	} else {
 		fmt.Println("Файл mod1_history.csv успешно сгенерирован.")

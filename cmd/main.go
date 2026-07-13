@@ -126,9 +126,9 @@ func main() {
 	fmt.Println("\n--- Запуск Градиентного спуска (начальное) ---")
 	measurements := algorithms.BuildMeasurements(nodes, distances, k)
 	algorithms.CheckConnectivity(nodes, measurements)
-	algorithms.RunGradientDescent(nodes, measurements, gAlpha, gLambda, gEps, gMaxIter)
+	algorithms.RunGradientDescent(nodes, measurements, gAlpha, gLambda, gEps, gMaxIter, false)
 	fmt.Println("\n--- Запуск Расширенного фильтра Калмана (начальное) ---")
-	algorithms.RunEKF(nodes, measurements, eIter, ekfQ, ekfR)
+	algorithms.RunEKF(nodes, measurements, eIter, ekfQ, ekfR, false)
 
 	fmt.Println("\nСостояние ПОСЛЕ начальной оптимизации:")
 	analytics.PrintGradientMetrics(nodes, realCoords, distances)
@@ -157,11 +157,11 @@ func main() {
 		// 5. Переоптимизация с warm start (малое число итераций)
 		measurements = algorithms.BuildMeasurements(nodes, distances, k)
 		fmt.Printf("  GD: %d итераций...", gdItersPerTick)
-		algorithms.RunGradientDescent(nodes, measurements, gAlpha, gLambda, gEps, gdItersPerTick)
+		algorithms.RunGradientDescent(nodes, measurements, gAlpha, gLambda, gEps, gdItersPerTick, true)
 		fmt.Printf(" OK\n")
 
 		fmt.Printf("  EKF: %d итераций...", ekfItersPerTick)
-		algorithms.RunEKF(nodes, measurements, ekfItersPerTick, ekfQ, ekfR)
+		algorithms.RunEKF(nodes, measurements, ekfItersPerTick, ekfQ, ekfR, true)
 		fmt.Printf(" OK\n")
 
 		// 6. Вычисление и логирование метрик на этом тике

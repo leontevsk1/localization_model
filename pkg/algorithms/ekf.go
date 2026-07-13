@@ -11,7 +11,7 @@ import (
 )
 
 // Анкерные узлы (node.IsAnchor == true) полностью исключены из вектора состояния: их координаты считаются точными и используются как неподвижные ориентиры при вычислении измерений и Якобиана для остальных узлов.
-func RunEKF(nodes []*types.Node, measurements []types.Measurement, iterations int, q, r float64) {
+func RunEKF(nodes []*types.Node, measurements []types.Measurement, iterations int, q, r float64, appendLog bool) {
 	n := len(nodes)
 
 	// Список подвижных узлов
@@ -168,7 +168,7 @@ func RunEKF(nodes []*types.Node, measurements []types.Measurement, iterations in
 	}
 
 	// Сохранение лога в корень проекта
-	if err := io.SaveEKFHistory("ekf_history.csv", ekfHistory, len(movable)); err != nil {
+	if err := io.SaveEKFHistory("ekf_history.csv", ekfHistory, len(movable), appendLog); err != nil {
 		fmt.Printf("Ошибка при записи лога EKF: %v\n", err)
 	} else {
 		fmt.Println("Файл ekf_history.csv успешно сгенерирован.")
