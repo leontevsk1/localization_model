@@ -14,3 +14,6 @@ ekf_iter = 10
 anchors_count = 3
 q = 0.001
 r = 0.01   # ≈ dist_err²
+
+[topology]
+k = 7

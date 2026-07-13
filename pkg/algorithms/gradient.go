@@ -1,11 +1,14 @@
-package main
+package algorithms
 
 import (
 	"fmt"
 	"math"
+
+	"vostok/pkg/io"
+	"vostok/pkg/types"
 )
 
-func RunGradientDescent(nodes []*Node, distances [][]float64, alpha, lambda, epsilon float64, maxIter int) {
+func RunGradientDescent(nodes []*types.Node, measurements []types.Measurement, alpha, lambda, epsilon float64, maxIter int) {
 	n := len(nodes)
 	csvData := [][]string{
 		{"Iteration", "Node0_X", "Node0_Y", "Node0_Z"},
@@ -15,38 +18,31 @@ func RunGradientDescent(nodes []*Node, distances [][]float64, alpha, lambda, eps
 		maxShift := 0.0
 
 		// Временный массив для хранения градиентов на текущем шаге
-		gradients := make([]Point, n)
+		gradients := make([]types.Point, n)
 
-		for i := 0; i < n; i++ {
+		for _, m := range measurements {
+			i, j := m.From, m.To
 			if nodes[i].IsAnchor {
-				gradients[i] = Point{} // нулевой градиент, для единообразия массива
 				continue
 			}
 
-			var gx, gy, gz float64
+			dCalc := types.Distance(nodes[i].CurrentCoord, nodes[j].CurrentCoord)
+			errRatio := 1.0 - (m.Value / dCalc)
 
-			// градиент от соседей
-			for j := 0; j < n; j++ {
-				if i == j {
-					continue
-				}
+			gradients[i].X += errRatio * (nodes[i].CurrentCoord.X - nodes[j].CurrentCoord.X)
+			gradients[i].Y += errRatio * (nodes[i].CurrentCoord.Y - nodes[j].CurrentCoord.Y)
+			gradients[i].Z += errRatio * (nodes[i].CurrentCoord.Z - nodes[j].CurrentCoord.Z)
+		}
 
-				dMeas := distances[i][j]
-				dCalc := Distance(nodes[i].CurrentCoord, nodes[j].CurrentCoord)
-
-				errRatio := 1.0 - (dMeas / dCalc)
-
-				gx += errRatio * (nodes[i].CurrentCoord.X - nodes[j].CurrentCoord.X)
-				gy += errRatio * (nodes[i].CurrentCoord.Y - nodes[j].CurrentCoord.Y)
-				gz += errRatio * (nodes[i].CurrentCoord.Z - nodes[j].CurrentCoord.Z)
+		// Регуляризация к InitialCoord
+		for i := 0; i < n; i++ {
+			if nodes[i].IsAnchor {
+				continue
 			}
 
-			// мягкий штраф за отдаление от мнимых координат
-			gx += lambda * (nodes[i].CurrentCoord.X - nodes[i].InitialCoord.X)
-			gy += lambda * (nodes[i].CurrentCoord.Y - nodes[i].InitialCoord.Y)
-			gz += lambda * (nodes[i].CurrentCoord.Z - nodes[i].InitialCoord.Z)
-
-			gradients[i] = Point{X: gx, Y: gy, Z: gz}
+			gradients[i].X += lambda * (nodes[i].CurrentCoord.X - nodes[i].InitialCoord.X)
+			gradients[i].Y += lambda * (nodes[i].CurrentCoord.Y - nodes[i].InitialCoord.Y)
+			gradients[i].Z += lambda * (nodes[i].CurrentCoord.Z - nodes[i].InitialCoord.Z)
 		}
 
 		// применение шага
@@ -85,8 +81,8 @@ func RunGradientDescent(nodes []*Node, distances [][]float64, alpha, lambda, eps
 		}
 	}
 
-	// Запись накопленного лога в файл через utils.go
-	if err := WriteHistoryToCSV("mod1_history.csv", csvData); err != nil {
+	// Запись накопленного лога в файл через pkg/io
+	if err := io.WriteHistoryToCSV("mod1_history.csv", csvData); err != nil {
 		fmt.Printf("Не удалось записать CSV: %v\n", err)
 	} else {
 		fmt.Println("Файл mod1_history.csv успешно сгенерирован.")

@@ -1,13 +1,17 @@
-package main
+package algorithms
 
 import (
 	"fmt"
 	"math"
+
 	"gonum.org/v1/gonum/mat"
+
+	"vostok/pkg/io"
+	"vostok/pkg/types"
 )
 
 // Анкерные узлы (node.IsAnchor == true) полностью исключены из вектора состояния: их координаты считаются точными и используются как неподвижные ориентиры при вычислении измерений и Якобиана для остальных узлов.
-func RunEKF(nodes []*Node, distances [][]float64, iterations int, q, r float64) {
+func RunEKF(nodes []*types.Node, measurements []types.Measurement, iterations int, q, r float64) {
 	n := len(nodes)
 
 	// Список подвижных узлов
@@ -32,13 +36,7 @@ func RunEKF(nodes []*Node, distances [][]float64, iterations int, q, r float64) 
 	// Хранилище истории
 	var ekfHistory [][]float64
 
-	// Подсчет количества измерений
-	numMeas := 0
-	for i := 0; i < n; i++ {
-		for j := i + 1; j < n; j++ {
-			numMeas++
-		}
-	}
+	numMeas := len(measurements)
 
 	// Инициализация вектора состояния X — только по подвижным узлам
 	xData := make([]float64, stateSize)
@@ -100,37 +98,29 @@ func RunEKF(nodes []*Node, distances [][]float64, iterations int, q, r float64) 
 		P.Add(P, Q)
 
 		// ЭТАП КОРРЕКЦИИ
-		measIdx := 0
-		for i := 0; i < n; i++ {
-			for j := i + 1; j < n; j++ {
-				xi, yi, zi := coordOf(i)
-				xj, yj, zj := coordOf(j)
+		for measIdx, m := range measurements {
+			i, j := m.From, m.To
+			xi, yi, zi := coordOf(i)
+			xj, yj, zj := coordOf(j)
 
-				dx, dy, dz := xi-xj, yi-yj, zi-zj
-				dCalc := math.Sqrt(dx*dx + dy*dy + dz*dz)
-				if dCalc == 0 {
-					dCalc = 1e-6 // Защита от деления на ноль
-				}
+			dx, dy, dz := xi-xj, yi-yj, zi-zj
+			dCalc := math.Sqrt(dx*dx + dy*dy + dz*dz)
+			if dCalc == 0 {
+				dCalc = 1e-6
+			}
 
-				Z.SetVec(measIdx, distances[i][j])
-				Zcalc.SetVec(measIdx, dCalc)
+			Z.SetVec(measIdx, m.Value)
+			Zcalc.SetVec(measIdx, dCalc)
 
-				// Якобиан заполняется только по тем координатам, которые
-				// реально есть в векторе состояния. Для анкера строка H
-				// по его столбцам просто не существует — вклад в невязку
-				// он вносит только через сам факт своей неподвижности.
-				if si := nodeToState[i]; si != -1 {
-					H.Set(measIdx, si*3+0, dx/dCalc)
-					H.Set(measIdx, si*3+1, dy/dCalc)
-					H.Set(measIdx, si*3+2, dz/dCalc)
-				}
-				if sj := nodeToState[j]; sj != -1 {
-					H.Set(measIdx, sj*3+0, -dx/dCalc)
-					H.Set(measIdx, sj*3+1, -dy/dCalc)
-					H.Set(measIdx, sj*3+2, -dz/dCalc)
-				}
-
-				measIdx++
+			if si := nodeToState[i]; si != -1 {
+				H.Set(measIdx, si*3+0, dx/dCalc)
+				H.Set(measIdx, si*3+1, dy/dCalc)
+				H.Set(measIdx, si*3+2, dz/dCalc)
+			}
+			if sj := nodeToState[j]; sj != -1 {
+				H.Set(measIdx, sj*3+0, -dx/dCalc)
+				H.Set(measIdx, sj*3+1, -dy/dCalc)
+				H.Set(measIdx, sj*3+2, -dz/dCalc)
 			}
 		}
 
@@ -178,7 +168,7 @@ func RunEKF(nodes []*Node, distances [][]float64, iterations int, q, r float64) 
 	}
 
 	// Сохранение лога в корень проекта
-	if err := SaveEKFHistory("ekf_history.csv", ekfHistory, len(movable)); err != nil {
+	if err := io.SaveEKFHistory("ekf_history.csv", ekfHistory, len(movable)); err != nil {
 		fmt.Printf("Ошибка при записи лога EKF: %v\n", err)
 	} else {
 		fmt.Println("Файл ekf_history.csv успешно сгенерирован.")

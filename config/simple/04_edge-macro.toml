@@ -13,3 +13,6 @@ max_iter = 2000
 ekf_iter = 10
 q = 1.0
 r = 225.0
+
+[topology]
+k = 7
