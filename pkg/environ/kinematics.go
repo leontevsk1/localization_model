@@ -9,9 +9,6 @@ import (
 // NodeMovement пересчитывает координаты узла на основе вектора скорости.
 // Обновляет RealCoord узла (истинное положение).
 func NodeMovement(node *types.Node, velocity types.Velocity, dt float64) {
-	if node.IsAnchor {
-		return
-	}
 	node.RealCoord.X += velocity.X * dt
 	node.RealCoord.Y += velocity.Y * dt
 	node.RealCoord.Z += velocity.Z * dt
@@ -27,35 +24,43 @@ func ErrorShift(node *types.Node, growthRate float64, rng *rand.Rand) {
 
 	node.TickCounter++
 	t := float64(node.TickCounter)
-	// e(t) = initialError + growthRate * t^2
-	newUncertainty := node.Uncertainty + growthRate*t*t
-	node.Uncertainty = newUncertainty
+	// Приращение e(t) - e(t-1) = k*(2t-1), телескопически даёт e(t) = d + k*t^2
+	delta := growthRate * (2*t - 1)
+	node.Uncertainty += delta
 
-	// Размытие BelievedCoord на один шаг случайного блуждания с текущим σ
-	dx := (rng.Float64()*2 - 1.0) * node.Uncertainty
-	dy := (rng.Float64()*2 - 1.0) * node.Uncertainty
-	dz := (rng.Float64()*2 - 1.0) * node.Uncertainty
+	// Размытие BelievedCoord на величину приращения ошибки за тик,
+	// чтобы суммарный дрейф следовал квадратичному закону, а не обгонял его
+	dx := (rng.Float64()*2 - 1.0) * delta
+	dy := (rng.Float64()*2 - 1.0) * delta
+	dz := (rng.Float64()*2 - 1.0) * delta
 
 	node.BelievedCoord.X += dx
 	node.BelievedCoord.Y += dy
 	node.BelievedCoord.Z += dz
 }
 
-// StepTrueMotion сдвигает RealCoord всех неанкерных узлов по случайному блужданию
-// с шагом motionSigma (типичный сценарий броуновского движения объектов).
-func StepTrueMotion(nodes []*types.Node, motionSigma float64, rng *rand.Rand) {
+// StepSwarmMotion сдвигает весь рой по общему командному вектору скорости.
+// RealCoord — истинное исполнение команды. BelievedCoord и CurrentCoord
+// сдвигаются на ту же величину: счисление пути по известной команде
+// (predict-шаг перед коррекцией дальномерами). Анкеры знают себя точно.
+func StepSwarmMotion(nodes []*types.Node, velocity types.Velocity, dt float64) {
 	for _, node := range nodes {
+		NodeMovement(node, velocity, dt)
+
 		if node.IsAnchor {
+			node.InitialCoord = node.RealCoord
+			node.CurrentCoord = node.RealCoord
+			node.BelievedCoord = node.RealCoord
 			continue
 		}
 
-		dx := (rng.Float64()*2 - 1.0) * motionSigma
-		dy := (rng.Float64()*2 - 1.0) * motionSigma
-		dz := (rng.Float64()*2 - 1.0) * motionSigma
+		node.BelievedCoord.X += velocity.X * dt
+		node.BelievedCoord.Y += velocity.Y * dt
+		node.BelievedCoord.Z += velocity.Z * dt
 
-		node.RealCoord.X += dx
-		node.RealCoord.Y += dy
-		node.RealCoord.Z += dz
+		node.CurrentCoord.X += velocity.X * dt
+		node.CurrentCoord.Y += velocity.Y * dt
+		node.CurrentCoord.Z += velocity.Z * dt
 	}
 }
 

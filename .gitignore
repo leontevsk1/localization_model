@@ -3,3 +3,5 @@
 spec.md
 .env
 report.md
+docs/
+.claude*

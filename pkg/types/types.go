@@ -13,7 +13,6 @@ type Config struct {
 
 	Hyperparams struct {
 		Alpha        float64 `toml:"alpha"`
-		Lambda       float64 `toml:"lambda"`
 		Eps          float64 `toml:"eps"`
 		MaxIter      int     `toml:"max_iter"`
 		EkfIter      int     `toml:"ekf_iter"`

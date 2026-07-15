@@ -11,7 +11,10 @@ import (
 )
 
 // Анкерные узлы (node.IsAnchor == true) полностью исключены из вектора состояния: их координаты считаются точными и используются как неподвижные ориентиры при вычислении измерений и Якобиана для остальных узлов.
-func RunEKF(nodes []*types.Node, measurements []types.Measurement, iterations int, q, r float64, appendLog bool) {
+// Вектор измерений: дальности + псевдо-GPS (BelievedCoord каждого подвижного узла
+// с дисперсией Uncertainty²) — фильтр сам взвешивает форму и привязку.
+// Ковариация P передаётся между вызовами (nil — инициализация); возвращается для следующего тика.
+func RunEKF(nodes []*types.Node, measurements []types.Measurement, iterations int, q, r float64, P *mat.Dense, appendLog bool) *mat.Dense {
 	n := len(nodes)
 
 	// Список подвижных узлов
@@ -30,13 +33,14 @@ func RunEKF(nodes []*types.Node, measurements []types.Measurement, iterations in
 
 	if stateSize == 0 {
 		fmt.Println("EKF пропущен: все узлы являются анкерами, оптимизировать нечего.")
-		return
+		return nil
 	}
 
 	// Хранилище истории
 	var ekfHistory [][]float64
 
-	numMeas := len(measurements)
+	numRange := len(measurements)
+	numMeas := numRange + stateSize
 
 	// Инициализация вектора состояния X — только по подвижным узлам
 	xData := make([]float64, stateSize)
@@ -47,10 +51,12 @@ func RunEKF(nodes []*types.Node, measurements []types.Measurement, iterations in
 	}
 	X := mat.NewVecDense(stateSize, xData)
 
-	// Инициализация ковариационной матрицы P
-	P := mat.NewDense(stateSize, stateSize, nil)
-	for i := 0; i < stateSize; i++ {
-		P.Set(i, i, 1.0) // Начальная неопределенность
+	// Ковариация P наследуется от предыдущего тика
+	if P == nil {
+		P = mat.NewDense(stateSize, stateSize, nil)
+		for i := 0; i < stateSize; i++ {
+			P.Set(i, i, 1.0) // Начальная неопределенность
+		}
 	}
 
 	// Матрицы шума процесса Q и шума измерений R
@@ -60,8 +66,15 @@ func RunEKF(nodes []*types.Node, measurements []types.Measurement, iterations in
 	}
 
 	R := mat.NewDense(numMeas, numMeas, nil)
-	for i := 0; i < numMeas; i++ {
+	for i := 0; i < numRange; i++ {
 		R.Set(i, i, r)
+	}
+	for k, nodeIdx := range movable {
+		u := nodes[nodeIdx].Uncertainty
+		gpsVar := math.Max(u*u, 1e-12)
+		for c := 0; c < 3; c++ {
+			R.Set(numRange+k*3+c, numRange+k*3+c, gpsVar)
+		}
 	}
 
 	// Предварительное выделение памяти под рабочие матрицы
@@ -82,6 +95,17 @@ func RunEKF(nodes []*types.Node, measurements []types.Measurement, iterations in
 	KX := mat.NewVecDense(stateSize, nil)
 	KH := mat.NewDense(stateSize, stateSize, nil)
 	IKH := mat.NewDense(stateSize, stateSize, nil)
+
+	// Строки псевдо-GPS в Якобиане постоянны: единица на своей компоненте состояния
+	for i := 0; i < stateSize; i++ {
+		H.Set(numRange+i, i, 1.0)
+	}
+	for k, nodeIdx := range movable {
+		b := nodes[nodeIdx].BelievedCoord
+		Z.SetVec(numRange+k*3+0, b.X)
+		Z.SetVec(numRange+k*3+1, b.Y)
+		Z.SetVec(numRange+k*3+2, b.Z)
+	}
 
 	// Вспомогательная функция: получить текущие координаты узла — из вектора состояния X, если узел подвижен, либо из nodes[], если это анкер.
 	coordOf := func(nodeIdx int) (x, y, z float64) {
@@ -122,6 +146,11 @@ func RunEKF(nodes []*types.Node, measurements []types.Measurement, iterations in
 				H.Set(measIdx, sj*3+1, -dy/dCalc)
 				H.Set(measIdx, sj*3+2, -dz/dCalc)
 			}
+		}
+
+		// Расчетные значения псевдо-GPS — текущее состояние
+		for i := 0; i < stateSize; i++ {
+			Zcalc.SetVec(numRange+i, X.AtVec(i))
 		}
 
 		// Вычисление инновации: Y = Z - Zcalc
@@ -173,4 +202,6 @@ func RunEKF(nodes []*types.Node, measurements []types.Measurement, iterations in
 	} else {
 		fmt.Println("Файл ekf_history.csv успешно сгенерирован.")
 	}
+
+	return P
 }

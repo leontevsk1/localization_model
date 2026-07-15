@@ -28,7 +28,6 @@ func main() {
 	kFlag := flag.Int("k", -1, "Число ближайших целей на узел (дефолт: n-1 для полносвязного графа)")
 
 	alpha := flag.Float64("alpha", 0.02, "Скорость обучения градиентного спуска")
-	lambda := flag.Float64("lambda", 0.15, "Вес мягкой регуляризации")
 	epsilon := flag.Float64("eps", 1e-5, "Критерий останова градиентного спуска")
 	maxIter := flag.Int("max-iter", 2000, "Лимит итераций градиентного спуска")
 	ekfIter := flag.Int("ekf-iter", 5, "Количество итераций EKF")
@@ -40,7 +39,7 @@ func main() {
 	var (
 		n int
 		sMin, sMax, gErr, dErr float64
-		gAlpha, gLambda, gEps float64
+		gAlpha, gEps float64
 		gMaxIter, eIter int
 		anchorsCount int
 		topologyK int
@@ -63,7 +62,6 @@ func main() {
 		dErr = cfg.Network.DistErr
 		anchorsCount = cfg.Hyperparams.AnchorsCount
 		gAlpha = cfg.Hyperparams.Alpha
-		gLambda = cfg.Hyperparams.Lambda
 		gEps = cfg.Hyperparams.Eps
 		gMaxIter = cfg.Hyperparams.MaxIter
 		eIter = cfg.Hyperparams.EkfIter
@@ -81,7 +79,6 @@ func main() {
 		dErr = *distErr
 		anchorsCount = *anchorsCountFlag
 		gAlpha = *alpha
-		gLambda = *lambda
 		gEps = *epsilon
 		gMaxIter = *maxIter
 		eIter = *ekfIter
@@ -113,10 +110,23 @@ func main() {
 
 	// Параметры движения
 	ticks := 10                      // количество шагов временной динамики
-	motionSigma := 0.5               // σ шага случайного блуждания объектов
-	growthRate := 0.01               // коэффициент линейного роста ошибки за шаг
+	dt := 1.0                        // длительность тика
+	swarmSpeed := 2.0                // модуль командной скорости роя, м/тик
+	growthRate := 0.01               // коэффициент квадратичного роста ошибки
 	gdItersPerTick := 50             // итерации GD на каждом тике
 	ekfItersPerTick := 3             // итерации EKF на каждом тике
+
+	// Командный вектор скорости — случайное направление, инициализируется один раз
+	dirX := rng.Float64()*2 - 1
+	dirY := rng.Float64()*2 - 1
+	dirZ := rng.Float64()*2 - 1
+	dirNorm := math.Sqrt(dirX*dirX + dirY*dirY + dirZ*dirZ)
+	velocity := types.Velocity{
+		X: dirX / dirNorm * swarmSpeed,
+		Y: dirY / dirNorm * swarmSpeed,
+		Z: dirZ / dirNorm * swarmSpeed,
+	}
+	fmt.Printf("Командная скорость роя: (%.2f, %.2f, %.2f) м/тик\n", velocity.X, velocity.Y, velocity.Z)
 
 	// [Выполнение алгоритмов]
 	fmt.Println("Состояние ДО оптимизации:")
@@ -125,25 +135,36 @@ func main() {
 	// Начальное решение (один раз)
 	fmt.Println("\n--- Запуск Градиентного спуска (начальное) ---")
 	measurements := algorithms.BuildMeasurements(nodes, distances, k)
-	algorithms.CheckConnectivity(nodes, measurements)
-	algorithms.RunGradientDescent(nodes, measurements, gAlpha, gLambda, gEps, gMaxIter, false)
+	if anchorsCount > 0 {
+		algorithms.CheckConnectivity(nodes, measurements)
+	}
+	algorithms.RunGradientDescent(nodes, measurements, gAlpha, dErr, gEps, gMaxIter, false)
 	fmt.Println("\n--- Запуск Расширенного фильтра Калмана (начальное) ---")
-	algorithms.RunEKF(nodes, measurements, eIter, ekfQ, ekfR, false)
+	ekfP := algorithms.RunEKF(nodes, measurements, eIter, ekfQ, ekfR, nil, false)
+
+	// Без анкеров gauge ненаблюдаем: совмещаем решение с GNSS-кадром (BelievedCoord)
+	if anchorsCount == 0 {
+		believedRef := make([]types.Point, n)
+		for i, node := range nodes {
+			believedRef[i] = node.BelievedCoord
+		}
+		algorithms.AlignMovableToReference(nodes, believedRef)
+	}
 
 	fmt.Println("\nСостояние ПОСЛЕ начальной оптимизации:")
 	analytics.PrintGradientMetrics(nodes, realCoords, distances)
 
 	// Тиковый цикл — движение и коррекция ошибок
 	tickMetrics := [][]interface{}{
-		{"Tick", "RawRMSE", "FinalRMSE", "CompensationRatio"},
+		{"Tick", "RawRMSE", "FinalRMSE", "ShapeRMSE", "CompensationRatio"},
 	}
 
 	fmt.Printf("\n--- Временная динамика: %d тиков ---\n", ticks)
 	for tick := 0; tick < ticks; tick++ {
 		fmt.Printf("\n[Тик %d] Сдвиг объектов, рост ошибки, переоптимизация\n", tick)
 
-		// 1. Смещение истинных координат на один шаг (случайное блуждание)
-		environ.StepTrueMotion(nodes, motionSigma, rng)
+		// 1. Сдвиг роя по командному вектору скорости (счисление пути)
+		environ.StepSwarmMotion(nodes, velocity, dt)
 
 		// 2. Рост ошибки (Uncertainty растёт, BelievedCoord размывается)
 		environ.GrowUncertainty(nodes, growthRate, rng)
@@ -154,19 +175,30 @@ func main() {
 		// 4. Пересчёт измеренных расстояний по новым истинным координатам
 		distances = environ.RecomputeDistances(nodes, dErr, rng)
 
+		// Снимок предсказанных координат — опора для gauge-фиксации после оптимизации
+		predicted := make([]types.Point, len(nodes))
+		for i, node := range nodes {
+			predicted[i] = node.CurrentCoord
+		}
+
 		// 5. Переоптимизация с warm start (малое число итераций)
 		measurements = algorithms.BuildMeasurements(nodes, distances, k)
 		fmt.Printf("  GD: %d итераций...", gdItersPerTick)
-		algorithms.RunGradientDescent(nodes, measurements, gAlpha, gLambda, gEps, gdItersPerTick, true)
+		algorithms.RunGradientDescent(nodes, measurements, gAlpha, dErr, gEps, gdItersPerTick, true)
 		fmt.Printf(" OK\n")
 
 		fmt.Printf("  EKF: %d итераций...", ekfItersPerTick)
-		algorithms.RunEKF(nodes, measurements, ekfItersPerTick, ekfQ, ekfR, true)
+		ekfP = algorithms.RunEKF(nodes, measurements, ekfItersPerTick, ekfQ, ekfR, ekfP, true)
 		fmt.Printf(" OK\n")
+
+		if anchorsCount == 0 {
+			algorithms.AlignMovableToReference(nodes, predicted)
+		}
 
 		// 6. Вычисление и логирование метрик на этом тике
 		rawRMSE := computeRawRMSE(nodes)
 		finalRMSE := computeFinalRMSE(nodes)
+		shapeRMSE := computeShapeRMSE(nodes)
 		compensationRatio := 0.0
 		if rawRMSE > 0 {
 			compensationRatio = rawRMSE / finalRMSE
@@ -175,10 +207,11 @@ func main() {
 		fmt.Printf("  Метрики на тике %d:\n", tick)
 		fmt.Printf("    Raw RMSE (BelievedCoord vs RealCoord): %.5f\n", rawRMSE)
 		fmt.Printf("    Final RMSE (CurrentCoord vs RealCoord): %.5f\n", finalRMSE)
+		fmt.Printf("    Shape RMSE (после выравнивания к RealCoord): %.5f\n", shapeRMSE)
 		fmt.Printf("    Compensation ratio: %.3f\n", compensationRatio)
 
 		// Добавляем метрики в историю
-		tickMetrics = append(tickMetrics, []interface{}{tick, rawRMSE, finalRMSE, compensationRatio})
+		tickMetrics = append(tickMetrics, []interface{}{tick, rawRMSE, finalRMSE, shapeRMSE, compensationRatio})
 	}
 
 	// Сохранение истории тиков в CSV
@@ -186,6 +219,11 @@ func main() {
 		fmt.Printf("Ошибка при записи tick_history.csv: %v\n", err)
 	} else {
 		fmt.Println("Файл tick_history.csv успешно сгенерирован.")
+	}
+
+	// realCoords снят при инициализации — после движения роя он устарел
+	for i, node := range nodes {
+		realCoords[i] = node.RealCoord
 	}
 
 	fmt.Println("\n--- Итоговое состояние ---")
@@ -240,6 +278,34 @@ func computeFinalRMSE(nodes []*types.Node) float64 {
 		return 0
 	}
 	return math.Sqrt(sumSqDist / float64(count))
+}
+
+// computeShapeRMSE — ошибка формы: RMSE после оптимального совмещения оценки
+// с истинными координатами. Показывает качество каркаса без ошибки привязки.
+func computeShapeRMSE(nodes []*types.Node) float64 {
+	current := make([]types.Point, 0, len(nodes))
+	real := make([]types.Point, 0, len(nodes))
+	for _, node := range nodes {
+		if node.IsAnchor {
+			continue
+		}
+		current = append(current, node.CurrentCoord)
+		real = append(real, node.RealCoord)
+	}
+	if len(current) == 0 {
+		return 0
+	}
+
+	aligned := algorithms.KabschAlign(current, real)
+
+	var sumSqDist float64
+	for i := range aligned {
+		dx := aligned[i].X - real[i].X
+		dy := aligned[i].Y - real[i].Y
+		dz := aligned[i].Z - real[i].Z
+		sumSqDist += dx*dx + dy*dy + dz*dz
+	}
+	return math.Sqrt(sumSqDist / float64(len(aligned)))
 }
 
 func saveTickMetricsToCSV(filename string, metrics [][]interface{}) error {
