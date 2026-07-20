@@ -7,12 +7,20 @@ dist_err = 0.02     # Идеальные дальномеры
 
 [hyperparams]
 alpha = 0.05        # Можно шагать смело
-lambda = 0.5        # Жесткая привязка к хорошему старту
 eps = 0.00001
 max_iter = 500
 ekf_iter = 5
+anchors_count = 0
 q = 0.001           # Шум процесса минимален
 r = 0.0004          # Высочайшее доверие к дальномерам в EKF
 
 [topology]
 k = 7
+
+[dynamics]
+ticks = 10
+dt = 1.0
+swarm_speed = 2.0
+growth_rate = 0.01
+gd_iters_per_tick = 50
+ekf_iters_per_tick = 3

@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
 import os
 import subprocess
-import toml
 import pandas as pd
 import matplotlib.pyplot as plt
 from datetime import datetime
-from pathlib import Path
 
 CONFIG_DIR = "config"
 MD_REPORT_PATH = "report.md"
@@ -23,30 +21,25 @@ def get_git_commit():
         return "Git-репозиторий не найден"
 
 
-def run_go_simulation(config_path=None, cli_args=None):
-    """Запускает симуляцию с конфигом или CLI аргументами."""
+def run_go_simulation(config_path):
+    """Запускает симуляцию с указанным конфигом."""
     # Логи GD/EKF накапливаются по тикам (append) — удаляем остатки
     # предыдущего прогона, чтобы график отражал только текущий запуск.
     for f in (GRADIENT_CSV, EKF_CSV, TICK_CSV):
         if os.path.exists(f):
             os.remove(f)
 
-    cmd = ["go", "run", "./cmd/main.go"]
-
-    if config_path:
-        cmd.extend(["-config", config_path])
-    if cli_args:
-        cmd.extend(cli_args)
+    cmd = ["go", "run", "./cmd/main.go", "-config", config_path]
 
     print(f"Команда: {' '.join(cmd)}\n")
     result = subprocess.run(cmd, capture_output=True, text=True, cwd=".")
 
     if result.returncode != 0:
-        print("❌ Ошибка выполнения:")
+        print("Ошибка выполнения:")
         print(result.stderr)
         return None
 
-    print("✓ Симуляция успешно завершена\n")
+    print("Симуляция успешно завершена\n")
     return result.stdout
 
 
@@ -68,6 +61,10 @@ def plot_metrics(run_id):
             plt.plot(x, df[f'{node_label}_X'], label='X', color='blue')
             plt.plot(x, df[f'{node_label}_Y'], label='Y', color='green')
             plt.plot(x, df[f'{node_label}_Z'], label='Z', color='red')
+            if 'RealX' in df.columns:
+                plt.plot(x, df['RealX'], label='X реальная', color='blue', linestyle='--', linewidth=1)
+                plt.plot(x, df['RealY'], label='Y реальная', color='green', linestyle='--', linewidth=1)
+                plt.plot(x, df['RealZ'], label='Z реальная', color='red', linestyle='--', linewidth=1)
             plt.title(f'Сходимость GD ({node_label}), сквозная история по всем тикам')
             plt.xlabel('Шаг (накопительно)')
             plt.ylabel('Координата')
@@ -79,7 +76,7 @@ def plot_metrics(run_id):
             plt.close()
             plots['gradient'] = img_path
         except Exception as e:
-            print(f"⚠ Ошибка при построении графика GD: {e}")
+            print(f"Ошибка при построении графика GD: {e}")
 
     # EKF — та же логика: сквозной индекс вместо скачущей колонки Iteration.
     if os.path.exists(EKF_CSV):
@@ -92,6 +89,10 @@ def plot_metrics(run_id):
                 plt.plot(x, df[f'{node_label}_X'], label='X', color='blue')
                 plt.plot(x, df[f'{node_label}_Y'], label='Y', color='green')
                 plt.plot(x, df[f'{node_label}_Z'], label='Z', color='red')
+                if 'RealX' in df.columns:
+                    plt.plot(x, df['RealX'], label='X реальная', color='blue', linestyle='--', linewidth=1)
+                    plt.plot(x, df['RealY'], label='Y реальная', color='green', linestyle='--', linewidth=1)
+                    plt.plot(x, df['RealZ'], label='Z реальная', color='red', linestyle='--', linewidth=1)
             else:
                 node_label = '?'
             plt.title(f'Траектория EKF ({node_label}), сквозная история по всем тикам')
@@ -105,7 +106,7 @@ def plot_metrics(run_id):
             plt.close()
             plots['ekf'] = img_path
         except Exception as e:
-            print(f"⚠ Ошибка при построении графика EKF: {e}")
+            print(f"Ошибка при построении графика EKF: {e}")
 
     # Временная динамика (тиков). RawRMSE (инерциальный дрейф без коррекции)
     # и FinalRMSE (после GD+EKF) обычно отличаются на 2-3 порядка — на общей
@@ -143,21 +144,17 @@ def plot_metrics(run_id):
             plt.close()
             plots['ticks'] = img_path
         except Exception as e:
-            print(f"⚠ Ошибка при построении графика тиков: {e}")
+            print(f"Ошибка при построении графика тиков: {e}")
 
     return plots
 
 
-def generate_markdown(commit, config_path, cli_args, output, plots, timestamp):
+def generate_markdown(commit, config_path, output, plots, timestamp):
     """Генерирует запись в report.md."""
     lines = []
     lines.append(f"## Тест ({timestamp})")
     lines.append(f"**Коммит:** `{commit}`")
-
-    if config_path:
-        lines.append(f"**Конфиг:** `{config_path}`")
-    if cli_args:
-        lines.append(f"**CLI флаги:** `{' '.join(cli_args)}`")
+    lines.append(f"**Конфиг:** `{config_path}`")
 
     lines.append("\n### Консоль")
     lines.append("```")
@@ -172,90 +169,21 @@ def generate_markdown(commit, config_path, cli_args, output, plots, timestamp):
     with open(MD_REPORT_PATH, "a", encoding="utf-8") as f:
         f.write("\n".join(lines))
 
-    print(f"✓ Отчёт добавлен в {MD_REPORT_PATH}")
+    print(f"Отчёт добавлен в {MD_REPORT_PATH}")
 
 
-def find_configs(pattern=None):
-    """Список конфигов."""
+def find_configs():
+    """Список конфигов config/*.toml."""
     configs = []
-    for root, dirs, files in os.walk(CONFIG_DIR):
-        for f in sorted(files):
-            if f.endswith(".toml"):
-                path = os.path.join(root, f)
-                configs.append(path)
-
-    if pattern:
-        configs = [c for c in configs if pattern.lower() in c.lower()]
-
+    for f in sorted(os.listdir(CONFIG_DIR)):
+        if f.endswith(".toml"):
+            configs.append(os.path.join(CONFIG_DIR, f))
     return configs
 
 
-def select_config_interactive():
-    """Интерактивный выбор конфига."""
-    configs = find_configs()
-
-    if not configs:
-        print("❌ Конфиги не найдены")
-        return None
-
-    print("\n📋 Доступные конфиги:")
-    for i, cfg in enumerate(configs, 1):
-        print(f"  {i}. {cfg}")
-
-    while True:
-        try:
-            choice = input("\nВыберите номер (или Enter для пропуска): ").strip()
-            if not choice:
-                return None
-            idx = int(choice) - 1
-            if 0 <= idx < len(configs):
-                return configs[idx]
-            print("❌ Неверный выбор")
-        except ValueError:
-            print("❌ Введите число")
-
-
-def input_cli_args():
-    """Интерактивный ввод CLI аргументов."""
-    print("\n⚙️  Параметры (Enter для пропуска):")
-    args = []
-
-    params = {
-        "nodes": "Кол-во узлов (default: из конфига)",
-        "space-min": "Min граница пространства",
-        "space-max": "Max граница пространства",
-        "gps-err": "Ошибка GPS (м)",
-        "dist-err": "Ошибка дальномеров (м)",
-        "k": "Число соседей k (default: n-1)",
-        "alpha": "Learning rate",
-        "lambda": "Регуляризация",
-        "eps": "Epsilon (порог остановки)",
-        "max-iter": "Макс итераций GD",
-        "ekf-iter": "Итерации EKF",
-        "q": "Шум процесса EKF",
-        "r": "Шум измерений EKF",
-    }
-
-    for param, desc in params.items():
-        val = input(f"  -{param}: {desc}\n    > ").strip()
-        if val:
-            args.extend([f"-{param}", val])
-
-    return args
-
-
-def menu_quick_test():
-    """Быстрый тест со случайным конфигом."""
-    configs = find_configs()
-    if not configs:
-        print("❌ Конфиги не найдены")
-        return
-
-    import random
-    cfg = random.choice(configs)
-    print(f"🎲 Выбран: {cfg}")
-
-    output = run_go_simulation(cfg)
+def run_and_report(config_path):
+    """Прогон одного конфига с графиками и записью в отчёт."""
+    output = run_go_simulation(config_path)
     if output is None:
         return
 
@@ -264,8 +192,7 @@ def menu_quick_test():
 
     generate_markdown(
         get_git_commit(),
-        cfg,
-        None,
+        config_path,
         output,
         plots,
         datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -274,117 +201,44 @@ def menu_quick_test():
 
 def menu_single_config():
     """Тест одного конфига."""
-    cfg = select_config_interactive()
-    if not cfg:
-        print("Отменено")
+    configs = find_configs()
+    if not configs:
+        print("Конфиги не найдены")
         return
 
-    output = run_go_simulation(cfg)
-    if output is None:
-        return
+    print("\nДоступные конфиги:")
+    for i, cfg in enumerate(configs, 1):
+        print(f"  {i}. {cfg}")
 
-    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-    plots = plot_metrics(run_id)
-
-    generate_markdown(
-        get_git_commit(),
-        cfg,
-        None,
-        output,
-        plots,
-        datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    )
-
-
-def menu_cli_only():
-    """Тест с ручными CLI параметрами."""
-    args = input_cli_args()
-    if not args:
-        print("Отменено")
-        return
-
-    output = run_go_simulation(cli_args=args)
-    if output is None:
-        return
-
-    run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-    plots = plot_metrics(run_id)
-
-    generate_markdown(
-        get_git_commit(),
-        None,
-        args,
-        output,
-        plots,
-        datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    )
+    while True:
+        try:
+            choice = input("\nВыберите номер (или Enter для отмены): ").strip()
+            if not choice:
+                print("Отменено")
+                return
+            idx = int(choice) - 1
+            if 0 <= idx < len(configs):
+                run_and_report(configs[idx])
+                return
+            print("Неверный выбор")
+        except ValueError:
+            print("Введите число")
 
 
 def menu_batch():
-    """Пакетный запуск конфигов с параметром сравнения."""
-    pattern = input("Фильтр конфигов (например 'anchors' или 'simple'): ").strip()
-    configs = find_configs(pattern)
-
+    """Пакетный запуск всех конфигов."""
+    configs = find_configs()
     if not configs:
-        print("❌ Конфиги не найдены")
+        print("Конфиги не найдены")
         return
 
-    print(f"\n📦 Найдено {len(configs)} конфигов:")
-    for cfg in configs:
-        print(f"  - {cfg}")
-
-    confirm = input("\nЗапустить все? (y/n): ").strip().lower()
-    if confirm != 'y':
-        return
-
-    # Параметр K для сравнения топологий
-    test_k = input("\nТестировать разные K? (Enter - нет, или список '2,3,4'): ").strip()
-    k_values = []
-    if test_k:
-        try:
-            k_values = [str(int(k.strip())) for k in test_k.split(',')]
-        except ValueError:
-            print("❌ Неверный формат K")
-            return
-
+    print(f"\nНайдено {len(configs)} конфигов")
     for cfg in configs:
         print(f"\n{'='*60}")
         print(f"Тестируем: {cfg}")
+        run_and_report(cfg)
 
-        if k_values:
-            for k in k_values:
-                print(f"\n  K={k}...")
-                output = run_go_simulation(cfg, ["-k", k])
-                if output is None:
-                    continue
-
-                run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-                plots = plot_metrics(run_id)
-                generate_markdown(
-                    get_git_commit(),
-                    cfg,
-                    ["-k", k],
-                    output,
-                    plots,
-                    datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                )
-        else:
-            output = run_go_simulation(cfg)
-            if output is None:
-                continue
-
-            run_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-            plots = plot_metrics(run_id)
-            generate_markdown(
-                get_git_commit(),
-                cfg,
-                None,
-                output,
-                plots,
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            )
-
-    print(f"\n✓ Тестирование завершено")
+    print("\nТестирование завершено")
 
 
 def main_menu():
@@ -393,17 +247,12 @@ def main_menu():
 
     while True:
         print(f"""
-╔════════════════════════════════════════════════════════════════╗
-║                    TESTBENCH - Vostok v2.0                     ║
-║              Интерактивное тестирование сети локализации        ║
-╚════════════════════════════════════════════════════════════════╝
+TESTBENCH - Vostok
+Тестирование сети локализации
 
-1. 🎲 Случайный конфиг
-2. 📋 Выбрать конфиг
-3. ⚙️  Только CLI параметры
-4. 📦 Пакетный запуск
-5. 📊 Просмотр отчёта
-0. ❌ Выход
+1. Запуск конфига
+2. Пакетный запуск всех конфигов
+0. Выход
 
 Текущий коммит: {get_git_commit()}
 """)
@@ -411,25 +260,13 @@ def main_menu():
         choice = input("Выберите действие: ").strip()
 
         if choice == "1":
-            menu_quick_test()
-        elif choice == "2":
             menu_single_config()
-        elif choice == "3":
-            menu_cli_only()
-        elif choice == "4":
+        elif choice == "2":
             menu_batch()
-        elif choice == "5":
-            if os.path.exists(MD_REPORT_PATH):
-                os.system(f"cat {MD_REPORT_PATH} | head -100")
-            else:
-                print(f"❌ {MD_REPORT_PATH} не найден")
         elif choice == "0":
-            print("До свидания!")
             break
         else:
-            print("❌ Неверный выбор")
-
-        input("\nPress Enter для продолжения...")
+            print("Неверный выбор")
 
 
 if __name__ == "__main__":

@@ -181,11 +181,14 @@ func RunEKF(nodes []*types.Node, measurements []types.Measurement, iterations in
 		P.Mul(IKH, P)
 
 		// Сохраняем текущее состояние подвижных узлов в историю
-		historyRow := make([]float64, 0, 1+stateSize)
+		// + истинные координаты первого подвижного узла (пунктир на графиках)
+		historyRow := make([]float64, 0, 1+stateSize+3)
 		historyRow = append(historyRow, float64(iter))
 		for i := 0; i < stateSize; i++ {
 			historyRow = append(historyRow, X.AtVec(i))
 		}
+		real := nodes[movable[0]].RealCoord
+		historyRow = append(historyRow, real.X, real.Y, real.Z)
 		ekfHistory = append(ekfHistory, historyRow)
 	}
 
@@ -199,8 +202,6 @@ func RunEKF(nodes []*types.Node, measurements []types.Measurement, iterations in
 	// Сохранение лога в корень проекта
 	if err := io.SaveEKFHistory("ekf_history.csv", ekfHistory, len(movable), appendLog); err != nil {
 		fmt.Printf("Ошибка при записи лога EKF: %v\n", err)
-	} else {
-		fmt.Println("Файл ekf_history.csv успешно сгенерирован.")
 	}
 
 	return P

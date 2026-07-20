@@ -11,7 +11,8 @@ import (
 // Веса построены на отношении дисперсий источников: невязки дальномеров имеют
 // вес 1, привязка узла к InitialCoord — distErr²/Uncertainty². Коррекция сама
 // затухает, когда дальномеры хуже текущей оценки узла, и наоборот.
-func RunGradientDescent(nodes []*types.Node, measurements []types.Measurement, alpha, distErr, epsilon float64, maxIter int, appendLog bool) {
+// Возвращает номер итерации, на которой остановился (maxIter при исчерпании лимита).
+func RunGradientDescent(nodes []*types.Node, measurements []types.Measurement, alpha, distErr, epsilon float64, maxIter int, appendLog bool) int {
 	n := len(nodes)
 
 	rangeVar := math.Max(distErr*distErr, 1e-12)
@@ -53,12 +54,13 @@ func RunGradientDescent(nodes []*types.Node, measurements []types.Measurement, a
 	}
 
 	csvData := [][]string{
-		{"Iteration", fmt.Sprintf("Node%d_X", logNode), fmt.Sprintf("Node%d_Y", logNode), fmt.Sprintf("Node%d_Z", logNode)},
+		{"Iteration", fmt.Sprintf("Node%d_X", logNode), fmt.Sprintf("Node%d_Y", logNode), fmt.Sprintf("Node%d_Z", logNode), "RealX", "RealY", "RealZ"},
 	}
 
 	alphaCur := alpha
 	prevCost := cost()
 	snapshot := make([]types.Point, n)
+	stoppedAt := maxIter
 
 	for iter := 0; iter < maxIter; iter++ {
 		gradients := make([]types.Point, n)
@@ -132,6 +134,7 @@ func RunGradientDescent(nodes []*types.Node, measurements []types.Measurement, a
 			alphaCur *= 0.5
 			if alphaCur < alpha*1e-12 {
 				fmt.Printf("Градиентный спуск остановлен: шаг выродился на итерации %d\n", iter)
+				stoppedAt = iter
 				break
 			}
 			continue
@@ -144,10 +147,13 @@ func RunGradientDescent(nodes []*types.Node, measurements []types.Measurement, a
 			fmt.Sprintf("%.4f", nodes[logNode].CurrentCoord.X),
 			fmt.Sprintf("%.4f", nodes[logNode].CurrentCoord.Y),
 			fmt.Sprintf("%.4f", nodes[logNode].CurrentCoord.Z),
+			fmt.Sprintf("%.4f", nodes[logNode].RealCoord.X),
+			fmt.Sprintf("%.4f", nodes[logNode].RealCoord.Y),
+			fmt.Sprintf("%.4f", nodes[logNode].RealCoord.Z),
 		})
 
 		if maxShift < epsilon {
-			fmt.Printf("Градиентный спуск сошелся на итерации %d\n", iter)
+			stoppedAt = iter
 			break
 		}
 	}
@@ -155,7 +161,7 @@ func RunGradientDescent(nodes []*types.Node, measurements []types.Measurement, a
 	// Запись накопленного лога в файл через pkg/io
 	if err := io.WriteHistoryToCSV("mod1_history.csv", csvData, appendLog); err != nil {
 		fmt.Printf("Не удалось записать CSV: %v\n", err)
-	} else {
-		fmt.Println("Файл mod1_history.csv успешно сгенерирован.")
 	}
+
+	return stoppedAt
 }

@@ -7,7 +7,6 @@ dist_err = 0.1
 
 [hyperparams]
 alpha = 0.02
-lambda = 0.01
 eps = 0.0001
 max_iter = 5000
 ekf_iter = 10
@@ -17,3 +16,11 @@ r = 0.01   # ≈ dist_err²
 
 [topology]
 k = 7
+
+[dynamics]
+ticks = 10
+dt = 1.0
+swarm_speed = 2.0
+growth_rate = 0.01
+gd_iters_per_tick = 50
+ekf_iters_per_tick = 3

@@ -34,6 +34,13 @@ func main() {
 	ekfQFlag := flag.Float64("q", 0.001, "Шум процесса EKF")
 	ekfRFlag := flag.Float64("r", 0.1, "Шум измерений EKF")
 	anchorsCountFlag := flag.Int("anchors", 0, "Количество анкерных узлов с точными координатами")
+
+	ticksFlag := flag.Int("ticks", 10, "Количество шагов временной динамики")
+	dtFlag := flag.Float64("dt", 1.0, "Длительность тика")
+	swarmSpeedFlag := flag.Float64("swarm-speed", 2.0, "Модуль командной скорости роя, м/тик")
+	growthRateFlag := flag.Float64("growth-rate", 0.01, "Коэффициент квадратичного роста ошибки")
+	gdTickIterFlag := flag.Int("gd-tick-iter", 50, "Итерации GD на каждом тике")
+	ekfTickIterFlag := flag.Int("ekf-tick-iter", 3, "Итерации EKF на каждом тике")
 	flag.Parse()
 
 	var (
@@ -46,10 +53,13 @@ func main() {
 
 		ekfQ float64
 		ekfR float64
+
+		ticks int
+		dt, swarmSpeed, growthRate float64
+		gdItersPerTick, ekfItersPerTick int
 	)
 	// Если передан конфиг — читаем его, иначе берем CLI флаги
 	if *configPath != "" {
-		fmt.Printf("Загрузка сценария из файла: %s\n", *configPath)
 		cfg, err := vio.LoadConfigFromFile(*configPath)
 		if err != nil {
 			fmt.Printf("Ошибка загрузки конфигурации: %v\n", err)
@@ -71,6 +81,12 @@ func main() {
 		if topologyK <= 0 {
 			topologyK = -1
 		}
+		ticks = cfg.Dynamics.Ticks
+		dt = cfg.Dynamics.Dt
+		swarmSpeed = cfg.Dynamics.SwarmSpeed
+		growthRate = cfg.Dynamics.GrowthRate
+		gdItersPerTick = cfg.Dynamics.GdItersPerTick
+		ekfItersPerTick = cfg.Dynamics.EkfItersPerTick
 	} else {
 		n = *numNodes
 		sMin = *spaceMin
@@ -78,12 +94,19 @@ func main() {
 		gErr = *gpsErr
 		dErr = *distErr
 		anchorsCount = *anchorsCountFlag
+		topologyK = -1
 		gAlpha = *alpha
 		gEps = *epsilon
 		gMaxIter = *maxIter
 		eIter = *ekfIter
 		ekfQ = *ekfQFlag
 		ekfR = *ekfRFlag
+		ticks = *ticksFlag
+		dt = *dtFlag
+		swarmSpeed = *swarmSpeedFlag
+		growthRate = *growthRateFlag
+		gdItersPerTick = *gdTickIterFlag
+		ekfItersPerTick = *ekfTickIterFlag
 	}
 
 	if n < 3 {
@@ -102,19 +125,11 @@ func main() {
 
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
-	fmt.Printf("--- Выполнение сценария ---\n")
-	fmt.Printf("Узлов: %d | Пространство: [%.1f, %.1f] | Шум GPS: ±%.2f м | Шум дальномеров: ±%.2f м | k=%d\n\n",
-		n, sMin, sMax, gErr, dErr, k)
+	fmt.Printf("N = %d; A = %d; (X, Y, Z) ∈ {%g, %g}; k = %d\n", n, anchorsCount, sMin, sMax, k)
+	fmt.Printf("dX, dY, dZ = ±%.2f м; dD = ±%.2f м\n", gErr, dErr)
+	fmt.Printf("t ∈ {1..%d}; |v| = %.2f м/тик; рост ошибки %.3f\n", ticks, swarmSpeed, growthRate)
 
 	nodes, realCoords, distances := environ.BuildMap(n, sMin, sMax, gErr, dErr, anchorsCount, rng)
-
-	// Параметры движения
-	ticks := 10                      // количество шагов временной динамики
-	dt := 1.0                        // длительность тика
-	swarmSpeed := 2.0                // модуль командной скорости роя, м/тик
-	growthRate := 0.01               // коэффициент квадратичного роста ошибки
-	gdItersPerTick := 50             // итерации GD на каждом тике
-	ekfItersPerTick := 3             // итерации EKF на каждом тике
 
 	// Командный вектор скорости — случайное направление, инициализируется один раз
 	dirX := rng.Float64()*2 - 1
@@ -126,20 +141,17 @@ func main() {
 		Y: dirY / dirNorm * swarmSpeed,
 		Z: dirZ / dirNorm * swarmSpeed,
 	}
-	fmt.Printf("Командная скорость роя: (%.2f, %.2f, %.2f) м/тик\n", velocity.X, velocity.Y, velocity.Z)
+	fmt.Println("\nСТАТИЧНАЯ КОРРЕКТИРОВКА:")
+	fmt.Println()
 
-	// [Выполнение алгоритмов]
-	fmt.Println("Состояние ДО оптимизации:")
-	analytics.PrintGradientMetrics(nodes, realCoords, distances)
+	rmseBefore, varBefore := analytics.ComputeGlobalMetrics(nodes, realCoords, distances)
 
 	// Начальное решение (один раз)
-	fmt.Println("\n--- Запуск Градиентного спуска (начальное) ---")
 	measurements := algorithms.BuildMeasurements(nodes, distances, k)
 	if anchorsCount > 0 {
 		algorithms.CheckConnectivity(nodes, measurements)
 	}
-	algorithms.RunGradientDescent(nodes, measurements, gAlpha, dErr, gEps, gMaxIter, false)
-	fmt.Println("\n--- Запуск Расширенного фильтра Калмана (начальное) ---")
+	gdIters := algorithms.RunGradientDescent(nodes, measurements, gAlpha, dErr, gEps, gMaxIter, false)
 	ekfP := algorithms.RunEKF(nodes, measurements, eIter, ekfQ, ekfR, nil, false)
 
 	// Без анкеров gauge ненаблюдаем: совмещаем решение с GNSS-кадром (BelievedCoord)
@@ -151,18 +163,28 @@ func main() {
 		algorithms.AlignMovableToReference(nodes, believedRef)
 	}
 
-	fmt.Println("\nСостояние ПОСЛЕ начальной оптимизации:")
-	analytics.PrintGradientMetrics(nodes, realCoords, distances)
+	rmseAfter, varAfter := analytics.ComputeGlobalMetrics(nodes, realCoords, distances)
+
+	fmt.Printf("Градиентный спуск %d итераций; Фильтр Калмана %d итераций\n", gdIters, eIter)
+	fmt.Printf("RMSE:      %.5f м  -> %.5f м  (Δ %+.5f)\n", rmseBefore, rmseAfter, rmseAfter-rmseBefore)
+	fmt.Printf("Дисперсия: %.5f м² -> %.5f м² (Δ %+.5f)\n", varBefore, varAfter, varAfter-varBefore)
+
+	if maxSpread, maxLabel, meanSpread, err := analytics.SummarizeEKFSpread("ekf_history.csv"); err != nil {
+		fmt.Printf("Ошибка при анализе истории EKF: %v\n", err)
+	} else {
+		fmt.Printf("Размах координат: max %.4g (%s), среднее %.4g\n", maxSpread, maxLabel, meanSpread)
+	}
 
 	// Тиковый цикл — движение и коррекция ошибок
 	tickMetrics := [][]interface{}{
 		{"Tick", "RawRMSE", "FinalRMSE", "ShapeRMSE", "CompensationRatio"},
 	}
 
-	fmt.Printf("\n--- Временная динамика: %d тиков ---\n", ticks)
+	fmt.Println("\nДИНАМИКА ПО ТИКАМ:")
+	fmt.Println()
+	fmt.Println("Тик |  RawRMSE | FinalRMSE | ShapeRMSE |  Ratio")
+	fmt.Println("----+----------+-----------+-----------+-------")
 	for tick := 0; tick < ticks; tick++ {
-		fmt.Printf("\n[Тик %d] Сдвиг объектов, рост ошибки, переоптимизация\n", tick)
-
 		// 1. Сдвиг роя по командному вектору скорости (счисление пути)
 		environ.StepSwarmMotion(nodes, velocity, dt)
 
@@ -183,13 +205,8 @@ func main() {
 
 		// 5. Переоптимизация с warm start (малое число итераций)
 		measurements = algorithms.BuildMeasurements(nodes, distances, k)
-		fmt.Printf("  GD: %d итераций...", gdItersPerTick)
 		algorithms.RunGradientDescent(nodes, measurements, gAlpha, dErr, gEps, gdItersPerTick, true)
-		fmt.Printf(" OK\n")
-
-		fmt.Printf("  EKF: %d итераций...", ekfItersPerTick)
 		ekfP = algorithms.RunEKF(nodes, measurements, ekfItersPerTick, ekfQ, ekfR, ekfP, true)
-		fmt.Printf(" OK\n")
 
 		if anchorsCount == 0 {
 			algorithms.AlignMovableToReference(nodes, predicted)
@@ -204,21 +221,10 @@ func main() {
 			compensationRatio = rawRMSE / finalRMSE
 		}
 
-		fmt.Printf("  Метрики на тике %d:\n", tick)
-		fmt.Printf("    Raw RMSE (BelievedCoord vs RealCoord): %.5f\n", rawRMSE)
-		fmt.Printf("    Final RMSE (CurrentCoord vs RealCoord): %.5f\n", finalRMSE)
-		fmt.Printf("    Shape RMSE (после выравнивания к RealCoord): %.5f\n", shapeRMSE)
-		fmt.Printf("    Compensation ratio: %.3f\n", compensationRatio)
+		fmt.Printf("%3d | %8.5f | %9.5f | %9.5f | %6.2f\n", tick, rawRMSE, finalRMSE, shapeRMSE, compensationRatio)
 
 		// Добавляем метрики в историю
 		tickMetrics = append(tickMetrics, []interface{}{tick, rawRMSE, finalRMSE, shapeRMSE, compensationRatio})
-	}
-
-	// Сохранение истории тиков в CSV
-	if err := saveTickMetricsToCSV("tick_history.csv", tickMetrics); err != nil {
-		fmt.Printf("Ошибка при записи tick_history.csv: %v\n", err)
-	} else {
-		fmt.Println("Файл tick_history.csv успешно сгенерирован.")
 	}
 
 	// realCoords снят при инициализации — после движения роя он устарел
@@ -226,18 +232,13 @@ func main() {
 		realCoords[i] = node.RealCoord
 	}
 
-	fmt.Println("\n--- Итоговое состояние ---")
-	analytics.PrintGradientMetrics(nodes, realCoords, distances)
+	rmseFinal, varFinal := analytics.ComputeGlobalMetrics(nodes, realCoords, distances)
+	fmt.Printf("\nИтог в динамике: RMSE = %.5f м, дисперсия = %.5f м²\n", rmseFinal, varFinal)
 
-	movable := make([]int, 0, len(nodes))
-	for i, node := range nodes {
-		if !node.IsAnchor {
-			movable = append(movable, i)
-		}
-	}
-
-	if err := analytics.AnalyzeEKFHistory("ekf_history.csv", nodes, movable, realCoords, distances); err != nil {
-		fmt.Printf("Ошибка при анализе статистики: %v\n", err)
+	if err := saveTickMetricsToCSV("tick_history.csv", tickMetrics); err != nil {
+		fmt.Printf("Ошибка при записи tick_history.csv: %v\n", err)
+	} else {
+		fmt.Println("Сохранено в: mod1_history.csv, ekf_history.csv, tick_history.csv")
 	}
 }
 

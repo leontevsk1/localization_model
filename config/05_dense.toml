@@ -7,12 +7,20 @@ dist_err = 1.0
 
 [hyperparams]
 alpha = 0.005       # Чем больше связей(пружин), тем меньше должен быть шаг
-lambda = 0.3
 eps = 0.0001
 max_iter = 1500     # Ограничиваем, чтобы не ждать вечность
 ekf_iter = 3        # Всего 3 такта EKF, так как матрица огромная
+anchors_count = 0
 q = 0.05
 r = 1.0
 
 [topology]
 k = 7
+
+[dynamics]
+ticks = 10
+dt = 1.0
+swarm_speed = 2.0
+growth_rate = 0.01
+gd_iters_per_tick = 50
+ekf_iters_per_tick = 3

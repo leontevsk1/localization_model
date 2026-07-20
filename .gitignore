@@ -1,7 +1,10 @@
 *.csv
 *.png
+!docs/images/*.png
 spec.md
 .env
 report.md
-docs/
+report_images/
 .claude*
+mkdocs.yml
+site/

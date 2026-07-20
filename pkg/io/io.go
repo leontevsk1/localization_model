@@ -82,6 +82,7 @@ func SaveEKFHistory(filename string, history [][]float64, nodeCount int, doAppen
 				fmt.Sprintf("Node%d_Z", i),
 			)
 		}
+		header = append(header, "RealX", "RealY", "RealZ")
 		if err := writer.Write(header); err != nil {
 			return err
 		}

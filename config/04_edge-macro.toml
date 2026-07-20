@@ -7,12 +7,20 @@ dist_err = 15.0
 
 [hyperparams]
 alpha = 5.0         # Огромный шаг для огромных расстояний
-lambda = 0.1
 eps = 0.5           # Останавливаемся, если узлы дрожат в пределах полуметра
 max_iter = 2000
 ekf_iter = 10
+anchors_count = 0
 q = 1.0
 r = 225.0
 
 [topology]
 k = 7
+
+[dynamics]
+ticks = 10
+dt = 1.0
+swarm_speed = 500.0 # Масштаб поля 50 км
+growth_rate = 0.01
+gd_iters_per_tick = 50
+ekf_iters_per_tick = 3

@@ -25,6 +25,15 @@ type Config struct {
 	Topology struct {
 		K int `toml:"k"`
 	} `toml:"topology"`
+
+	Dynamics struct {
+		Ticks           int     `toml:"ticks"`
+		Dt              float64 `toml:"dt"`
+		SwarmSpeed      float64 `toml:"swarm_speed"`
+		GrowthRate      float64 `toml:"growth_rate"`
+		GdItersPerTick  int     `toml:"gd_iters_per_tick"`
+		EkfItersPerTick int     `toml:"ekf_iters_per_tick"`
+	} `toml:"dynamics"`
 }
 
 type Measurement struct {
