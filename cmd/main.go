@@ -44,18 +44,18 @@ func main() {
 	flag.Parse()
 
 	var (
-		n int
+		n                      int
 		sMin, sMax, gErr, dErr float64
-		gAlpha, gEps float64
-		gMaxIter, eIter int
-		anchorsCount int
-		topologyK int
+		gAlpha, gEps           float64
+		gMaxIter, eIter        int
+		anchorsCount           int
+		topologyK              int
 
 		ekfQ float64
 		ekfR float64
 
-		ticks int
-		dt, swarmSpeed, growthRate float64
+		ticks                           int
+		dt, swarmSpeed, growthRate      float64
 		gdItersPerTick, ekfItersPerTick int
 	)
 	// Если передан конфиг — читаем его, иначе берем CLI флаги
